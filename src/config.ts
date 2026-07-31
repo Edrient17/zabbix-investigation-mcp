@@ -47,6 +47,23 @@ function integer(name: string, fallback: number, minimum = 1): number {
   return value;
 }
 
+function ratio(name: string, fallback: number): number {
+  const raw = process.env[name]?.trim();
+  if (!raw) {
+    return fallback;
+  }
+
+  const value = Number.parseFloat(raw);
+  if (!Number.isFinite(value) || value < 0 || value > 1) {
+    throw new AppError(
+      "CONFIG_ERROR",
+      `${name} must be a number between 0 and 1`,
+      { status: 500 },
+    );
+  }
+  return value;
+}
+
 function csv(name: string): string[] {
   return (process.env[name] ?? "")
     .split(",")
@@ -102,6 +119,7 @@ export function loadConfig(): AppConfig {
         50_000,
       ),
       maxFutureHours: integer("INVESTIGATION_MAX_FUTURE_HOURS", 2),
+      minCoverageRatio: ratio("INVESTIGATION_MIN_COVERAGE_RATIO", 0.95),
       allowedHostGroupIds: csv("ZABBIX_ALLOWED_HOST_GROUP_IDS"),
     },
     defaultTimezone: process.env.DEFAULT_TIMEZONE?.trim() || "Asia/Seoul",

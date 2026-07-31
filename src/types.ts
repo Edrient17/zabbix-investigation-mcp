@@ -10,6 +10,12 @@ export interface QueryPolicy {
   maxHistoryPoints: number;
   maxSourcePoints: number;
   maxFutureHours: number;
+  /**
+   * Coverage below this ratio marks a result partial. A window the source data
+   * only sparsely covers is not a complete answer, even when nothing was
+   * truncated by a query limit.
+   */
+  minCoverageRatio: number;
   allowedHostGroupIds: string[];
 }
 

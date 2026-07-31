@@ -22,6 +22,7 @@ describe("MCP tool registration", () => {
       maxHistoryPoints: 1_000,
       maxSourcePoints: 50_000,
       maxFutureHours: 2,
+      minCoverageRatio: 0.95,
       allowedHostGroupIds: [],
     });
     const server = new McpServer({

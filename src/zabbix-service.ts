@@ -493,7 +493,11 @@ export class ZabbixService {
       interval,
     );
     const points = allPoints.slice(0, maximumPoints);
-    const partial = history.partial || points.length < allPoints.length;
+    const coverage = coverageRatio(allPoints.length, expected);
+    const partial =
+      history.partial ||
+      points.length < allPoints.length ||
+      this.coverageIsInsufficient(coverage);
 
     return {
       tool_call_id: randomUUID(),
@@ -516,7 +520,7 @@ export class ZabbixService {
         sample_count: history.points.length,
         returned_points: points.length,
         expected_buckets: expected,
-        coverage_ratio: coverageRatio(allPoints.length, expected),
+        coverage_ratio: coverage,
         partial,
       },
     };
@@ -605,6 +609,7 @@ export class ZabbixService {
         : points.slice(0, this.policy.maxHistoryPoints);
       const responseTruncated = returnedPoints.length < points.length &&
         input.include_points !== false;
+      const coverage = coverageRatio(points.length, expected);
 
       series.push({
         evidence_id: evidenceId(
@@ -620,8 +625,11 @@ export class ZabbixService {
           sample_count: sampleCount,
           returned_points: returnedPoints.length,
           expected_buckets: expected,
-          coverage_ratio: coverageRatio(points.length, expected),
-          partial: sourcePartial || responseTruncated,
+          coverage_ratio: coverage,
+          partial:
+            sourcePartial ||
+            responseTruncated ||
+            this.coverageIsInsufficient(coverage),
         },
       });
     }
@@ -709,6 +717,10 @@ export class ZabbixService {
       result_count: filtered.length,
       partial: events.length === limit,
     };
+  }
+
+  private coverageIsInsufficient(coverage: number | null): boolean {
+    return coverage !== null && coverage < this.policy.minCoverageRatio;
   }
 
   private async assertHostAllowed(hostId: string): Promise<ZabbixHost> {

@@ -39,6 +39,7 @@ function makePolicy(
     maxHistoryPoints: 1_000,
     maxSourcePoints: 50_000,
     maxFutureHours: 2,
+    minCoverageRatio: 0.95,
     allowedHostGroupIds: ["10"],
     ...overrides,
   };
@@ -170,6 +171,108 @@ describe("ZabbixService", () => {
       coverage_ratio: 0.083333,
     });
     expect(api.calls.some((call) => call.method === "history.get")).toBe(false);
+  });
+
+  it("marks a sparsely covered window partial even when nothing was truncated", async () => {
+    // Two hourly trend rows inside a 24h window: nothing hit a query limit, but
+    // 22 of 24 buckets have no source data at all.
+    const from = Date.parse("2026-07-01T00:00:00Z") / 1_000;
+    const api = new MockZabbixApi({
+      "host.get": () => [allowedHost],
+      "item.get": () => [cpuItem],
+      "trend.get": () =>
+        Array.from({ length: 2 }, (_, index) => ({
+          itemid: "42269",
+          clock: String(from + index * 3_600),
+          num: "60",
+          value_min: "10",
+          value_avg: "20",
+          value_max: "30",
+        })),
+    });
+    const service = new ZabbixService(api, makePolicy());
+
+    const result = await service.getMetricSummary({
+      host_id: "10084",
+      item_ids: ["42269"],
+      time_from: "2026-07-01T00:00:00Z",
+      time_to: "2026-07-02T00:00:00Z",
+      aggregation: "1h",
+      policy: "long_term_capacity",
+    });
+    const series = result.series as Array<Record<string, unknown>>;
+
+    expect(series[0]?.data_quality).toMatchObject({
+      returned_points: 2,
+      expected_buckets: 24,
+      coverage_ratio: 0.083333,
+      partial: true,
+    });
+  });
+
+  it("keeps a fully covered window non-partial", async () => {
+    const from = Date.parse("2026-07-30T01:00:00Z") / 1_000;
+    const api = new MockZabbixApi({
+      "host.get": () => [allowedHost],
+      "item.get": () => [cpuItem],
+      "history.get": () =>
+        Array.from({ length: 10 }, (_, index) => ({
+          itemid: "42269",
+          clock: String(from + index * 60),
+          ns: "0",
+          value: String(index + 1),
+        })),
+    });
+    const service = new ZabbixService(api, makePolicy());
+
+    const result = await service.getMetricHistory({
+      host_id: "10084",
+      item_id: "42269",
+      time_from: "2026-07-30T01:00:00Z",
+      time_to: "2026-07-30T01:10:00Z",
+      aggregation: "5m",
+    });
+
+    expect(result.data_quality).toMatchObject({
+      coverage_ratio: 1,
+      partial: false,
+    });
+  });
+
+  it("honours a relaxed minimum coverage ratio", async () => {
+    const from = Date.parse("2026-07-01T00:00:00Z") / 1_000;
+    const api = new MockZabbixApi({
+      "host.get": () => [allowedHost],
+      "item.get": () => [cpuItem],
+      "trend.get": () =>
+        Array.from({ length: 2 }, (_, index) => ({
+          itemid: "42269",
+          clock: String(from + index * 3_600),
+          num: "60",
+          value_min: "10",
+          value_avg: "20",
+          value_max: "30",
+        })),
+    });
+    const service = new ZabbixService(
+      api,
+      makePolicy({ minCoverageRatio: 0 }),
+    );
+
+    const result = await service.getMetricSummary({
+      host_id: "10084",
+      item_ids: ["42269"],
+      time_from: "2026-07-01T00:00:00Z",
+      time_to: "2026-07-02T00:00:00Z",
+      aggregation: "1h",
+      policy: "long_term_capacity",
+    });
+    const series = result.series as Array<Record<string, unknown>>;
+
+    expect(series[0]?.data_quality).toMatchObject({
+      coverage_ratio: 0.083333,
+      partial: false,
+    });
   });
 
   it("rejects hosts outside the group allowlist", async () => {
