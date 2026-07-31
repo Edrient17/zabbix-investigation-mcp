@@ -1,0 +1,183 @@
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import * as z from "zod/v4";
+import { errorPayload } from "./errors.js";
+import { aggregationValues } from "./types.js";
+import type { ZabbixService } from "./zabbix-service.js";
+
+const zabbixId = z
+  .string()
+  .regex(/^\d+$/, "Zabbix IDs must contain decimal digits only");
+const isoTime = z
+  .string()
+  .describe("ISO 8601 timestamp including Z or an explicit UTC offset");
+const aggregation = z.enum(aggregationValues);
+const summaryAggregation = z.enum([
+  "1m",
+  "5m",
+  "15m",
+  "1h",
+  "6h",
+  "1d",
+]);
+const severity = z.enum([
+  "not_classified",
+  "information",
+  "warning",
+  "average",
+  "high",
+  "disaster",
+]);
+
+async function resultOf(
+  operation: () => Promise<Record<string, unknown>>,
+): Promise<CallToolResult> {
+  try {
+    const result = await operation();
+    return {
+      content: [{ type: "text", text: JSON.stringify(result) }],
+      structuredContent: result,
+    };
+  } catch (error) {
+    const payload = errorPayload(error);
+    return {
+      content: [{ type: "text", text: JSON.stringify(payload) }],
+      structuredContent: payload,
+      isError: true,
+    };
+  }
+}
+
+export function registerTools(
+  server: McpServer,
+  service: ZabbixService,
+): void {
+  server.registerTool(
+    "find_hosts",
+    {
+      title: "Find Zabbix hosts",
+      description:
+        "Search visible, allowlisted Zabbix hosts by technical name or display name. Never choose a host when multiple plausible candidates remain.",
+      inputSchema: {
+        query: z.string().trim().min(1).max(200),
+        limit: z.number().int().min(1).max(50).optional(),
+      },
+    },
+    (input) => resultOf(() => service.findHosts(input)),
+  );
+
+  server.registerTool(
+    "get_incident_events",
+    {
+      title: "Get incident events",
+      description:
+        "Retrieve trigger problem events and their recovery events for one host in a bounded time window. Use this before selecting detailed metrics.",
+      inputSchema: {
+        host_id: zabbixId,
+        time_from: isoTime,
+        time_to: isoTime,
+        severities: z.array(severity).max(6).optional(),
+        include_recovery: z.boolean().default(true),
+        limit: z.number().int().min(1).max(100).optional(),
+      },
+    },
+    (input) => resultOf(() => service.getIncidentEvents(input)),
+  );
+
+  server.registerTool(
+    "get_trigger_details",
+    {
+      title: "Get trigger details",
+      description:
+        "Retrieve a read-only trigger definition, related items, dependencies, tags, and operational description.",
+      inputSchema: {
+        trigger_id: zabbixId,
+      },
+    },
+    (input) => resultOf(() => service.getTriggerDetails(input)),
+  );
+
+  server.registerTool(
+    "list_relevant_metrics",
+    {
+      title: "List relevant numeric metrics",
+      description:
+        "Rank numeric items on a host using incident-specific keywords. The investigation Agent chooses the keywords; this tool performs deterministic catalog filtering and ranking.",
+      inputSchema: {
+        host_id: zabbixId,
+        keywords: z.array(z.string().trim().min(1).max(100)).min(1).max(20),
+        limit: z.number().int().min(1).max(100).optional(),
+      },
+    },
+    (input) => resultOf(() => service.listRelevantMetrics(input)),
+  );
+
+  server.registerTool(
+    "get_metric_summary",
+    {
+      title: "Get aggregated metric summaries",
+      description:
+        "Retrieve and deterministically aggregate numeric metrics. The Agent chooses the window and aggregation. Use long_term_capacity only for capacity or slow trend analysis and use at least 1h aggregation.",
+      inputSchema: {
+        host_id: zabbixId,
+        item_ids: z.array(zabbixId).min(1).max(20),
+        time_from: isoTime,
+        time_to: isoTime,
+        aggregation: summaryAggregation,
+        policy: z
+          .enum(["standard", "long_term_capacity"])
+          .default("standard"),
+        data_source: z
+          .enum(["auto", "history", "trends"])
+          .default("auto"),
+        include_points: z.boolean().default(true),
+      },
+    },
+    (input) => resultOf(() => service.getMetricSummary(input)),
+  );
+
+  server.registerTool(
+    "get_metric_history",
+    {
+      title: "Get detailed metric history",
+      description:
+        "Retrieve detailed history for one numeric metric after a summary has identified an interesting interval. Choose a coarser aggregation if the point limit would be exceeded.",
+      inputSchema: {
+        host_id: zabbixId,
+        item_id: zabbixId,
+        time_from: isoTime,
+        time_to: isoTime,
+        aggregation,
+        max_points: z.number().int().min(1).max(1_000).optional(),
+      },
+    },
+    (input) => resultOf(() => service.getMetricHistory(input)),
+  );
+
+  server.registerTool(
+    "get_related_events",
+    {
+      title: "Get related events",
+      description:
+        "Retrieve neighboring problem and recovery events on the same host, optionally restricted by trigger IDs or exact tags.",
+      inputSchema: {
+        host_id: zabbixId,
+        time_from: isoTime,
+        time_to: isoTime,
+        exclude_event_id: zabbixId.optional(),
+        trigger_ids: z.array(zabbixId).max(100).optional(),
+        tags: z
+          .array(
+            z.object({
+              tag: z.string().trim().min(1).max(255),
+              value: z.string().max(255),
+            }),
+          )
+          .max(20)
+          .optional(),
+        limit: z.number().int().min(1).max(100).optional(),
+      },
+    },
+    (input) => resultOf(() => service.getRelatedEvents(input)),
+  );
+}
