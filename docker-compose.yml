@@ -9,8 +9,12 @@ services:
     environment:
       MCP_HOST: 0.0.0.0
       MCP_PORT: 3000
+    # Published on the bind address only. Docker inserts its forwarding rules
+    # ahead of ufw, so a host firewall will not contain a 0.0.0.0 publish --
+    # the bind address is what actually limits exposure. Default to loopback so
+    # an unset value cannot silently expose the server on a public interface.
     ports:
-      - "${MCP_PUBLISHED_PORT:-3000}:3000"
+      - "${MCP_BIND_ADDRESS:-127.0.0.1}:${MCP_PUBLISHED_PORT:-3000}:3000"
     restart: unless-stopped
     healthcheck:
       test:

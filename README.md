@@ -27,7 +27,11 @@ Copy-Item .env.example .env
 
 - `ZABBIX_URL`: `/api_jsonrpc.php`를 포함한 Zabbix API URL
 - `ZABBIX_API_TOKEN`: 읽기 전용 API Token
-- `ZABBIX_ALLOWED_HOST_GROUP_IDS`: 조회를 허용할 Host Group ID 목록
+- `ZABBIX_ALLOWED_HOST_GROUP_IDS`: 조회를 허용할 Host Group ID 목록.
+  비워 두면 토큰이 볼 수 있는 **모든** 호스트가 조사 대상이 됩니다. 제한은
+  그룹 단위로만 동작하므로, 특정 호스트 몇 대만 대상으로 삼으려면 Zabbix에
+  전용 호스트 그룹을 만들어 그 ID 하나만 지정하십시오. 기존 운영 그룹을
+  그대로 쓰면 의도하지 않은 호스트까지 함께 열립니다.
 - `ZABBIX_MCP_AUTH_TOKEN`: MCP 클라이언트가 사용할 Bearer Token
 
 `ZABBIX_MCP_AUTH_TOKEN`은 길고 무작위인 값을 사용합니다.
@@ -56,6 +60,42 @@ MCP 요청에는 다음 헤더가 필요합니다.
 ```text
 Authorization: Bearer <ZABBIX_MCP_AUTH_TOKEN>
 ```
+
+## 네트워크 노출 제한
+
+컨테이너 포트가 게시되는 호스트 인터페이스는 `MCP_BIND_ADDRESS`가 정합니다.
+
+```dotenv
+MCP_BIND_ADDRESS=192.168.20.22   # 이 머신의 사설 IP
+```
+
+값을 지정하지 않으면 `127.0.0.1`로 게시되므로, 설정을 빠뜨려도 공인
+인터페이스에 열리지 않습니다.
+
+`MCP_HOST`와 혼동하지 않아야 합니다. `MCP_HOST`는 프로세스 자체의 바인드
+주소이고 docker compose에서는 컨테이너 내부 기준 `0.0.0.0`으로 고정됩니다.
+호스트 노출을 실제로 통제하는 값은 `MCP_BIND_ADDRESS`입니다.
+
+Docker는 자신의 forwarding 규칙을 ufw보다 앞에 삽입하므로, `0.0.0.0`으로
+게시한 포트는 호스트 방화벽으로 막히지 않습니다. 방화벽에 의존하지 말고 바인드
+주소를 지정하십시오. 클라우드 보안 그룹에서도 3000 포트를 사설 대역으로
+제한하는 것을 권장합니다.
+
+적용 결과는 실행 전에 확인할 수 있습니다.
+
+```powershell
+docker compose config
+```
+
+```yaml
+ports:
+  - host_ip: 192.168.20.22
+    published: "3000"
+    target: 3000
+```
+
+`MCP_ALLOWED_HOSTS`는 소스 IP가 아니라 요청의 `Host` 헤더를 검사합니다. DNS
+rebinding 방어용이며 네트워크 접근 제어를 대신하지 않습니다.
 
 운영 환경에서는 3000 포트를 인터넷에 그대로 공개하지 말고 HTTPS reverse
 proxy, 방화벽 또는 사설 네트워크를 사용합니다.
