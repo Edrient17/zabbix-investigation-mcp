@@ -15,7 +15,13 @@
     "rootDir": ".",
     "outDir": "dist",
     "declaration": true,
-    "sourceMap": true
+    "sourceMap": true,
+    // This config exists to typecheck src and tests together, so its rootDir is
+    // the repository root. Emitting with it lands the output in dist/src and
+    // dist/tests, beside -- not replacing -- the flat dist/ that
+    // tsconfig.build.json produces and that `npm start` and the Dockerfile run.
+    // Only the build config emits; tsconfig.build.json turns this back off.
+    "noEmit": true
   },
   "include": ["src/**/*.ts", "tests/**/*.ts"],
   "exclude": ["dist", "node_modules"]
