@@ -6,7 +6,9 @@ Agent가 조사할 호스트·메트릭·시간 범위·집계 간격을 결정�
 
 ## 제공 도구
 
-- `find_hosts`
+- `find_hosts` — 이름으로 검색하거나, `group_ids`로 호스트 그룹에 속한 호스트를
+  나열합니다. 후자는 질문이 호스트를 지목하지 않는 조사(정기 보고서 등)가
+  대상을 정하는 경로입니다. 둘 중 하나는 반드시 필요합니다.
 - `get_incident_events`
 - `get_trigger_details`
 - `list_relevant_metrics`
@@ -32,6 +34,11 @@ Copy-Item .env.example .env
   그룹 단위로만 동작하므로, 특정 호스트 몇 대만 대상으로 삼으려면 Zabbix에
   전용 호스트 그룹을 만들어 그 ID 하나만 지정하십시오. 기존 운영 그룹을
   그대로 쓰면 의도하지 않은 호스트까지 함께 열립니다.
+
+  `find_hosts`가 `group_ids`로 그룹을 지정해도 이 목록이 상한입니다. 목록에
+  없는 그룹은 결과에서 제외되고 `excluded_group_ids`로 알려 주며, 요청한
+  그룹이 전부 목록 밖이면 빈 결과가 아니라 오류를 냅니다 — 빈 결과는 "그
+  그룹에 호스트가 없다"로 읽히는데 그건 다른 사실입니다.
 - `ZABBIX_MCP_AUTH_TOKEN`: MCP 클라이언트가 사용할 Bearer Token
 
 `ZABBIX_MCP_AUTH_TOKEN`은 길고 무작위인 값을 사용합니다.

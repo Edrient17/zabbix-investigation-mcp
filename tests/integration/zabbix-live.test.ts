@@ -183,6 +183,36 @@ describe.skipIf(!enabled)("live Zabbix integration", () => {
         expect(Array.isArray(host.groups)).toBe(true);
       }
     });
+
+    // Round trip through a group the target host really belongs to, so this
+    // needs no configuration of its own: whatever the search returned tells us
+    // which group to list, and the host must come back out of it.
+    it("lists the hosts of a group without a name to search on", async () => {
+      const found = (await service.findHosts({ query: hostQuery!, limit: 1 })) as {
+        hosts: Array<{ host_id: string; groups: Array<{ group_id: string }> }>;
+      };
+      const groupId = found.hosts[0]?.groups[0]?.group_id;
+      if (!groupId) {
+        return;
+      }
+
+      const listed = (await service.findHosts({
+        group_ids: [groupId],
+        limit: 50,
+      })) as {
+        hosts: Array<{ host_id: string }>;
+        group_ids: string[] | null;
+        query: string | null;
+        result_count: number;
+      };
+
+      expect(listed.query).toBeNull();
+      expect(listed.group_ids).toEqual([groupId]);
+      expect(listed.result_count).toBe(listed.hosts.length);
+      expect(listed.hosts.map((host) => host.host_id)).toContain(
+        found.hosts[0]!.host_id,
+      );
+    });
   });
 
   describe("list_relevant_metrics", () => {

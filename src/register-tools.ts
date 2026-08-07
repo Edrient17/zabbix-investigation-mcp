@@ -57,9 +57,10 @@ export function registerTools(
     {
       title: "Find Zabbix hosts",
       description:
-        "Search visible, allowlisted Zabbix hosts by technical name or display name. Never choose a host when multiple plausible candidates remain.",
+        "Resolve which hosts to investigate. Give query to search allowlisted hosts by technical or display name. Give group_ids to list the hosts belonging to those host groups, which is how an investigation covering a whole estate finds its subjects when the request names no host. Both may be given together to search within groups. At least one is required. Never choose a host when several plausible candidates remain for one name.",
       inputSchema: {
-        query: z.string().trim().min(1).max(200),
+        query: z.string().trim().min(1).max(200).optional(),
+        group_ids: z.array(zabbixId).min(1).max(20).optional(),
         limit: z.number().int().min(1).max(50).optional(),
       },
     },

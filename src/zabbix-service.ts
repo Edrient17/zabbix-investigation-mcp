@@ -148,7 +148,10 @@ const numberToSeverity = [
 export type Severity = keyof typeof severityToNumber;
 
 export interface FindHostsInput {
-  query: string;
+  /** Name to search for. Omitted when listing a group wholesale. */
+  query?: string;
+  /** Host groups to list. Omitted when searching by name. */
+  group_ids?: string[];
   limit?: number;
 }
 
@@ -228,28 +231,52 @@ export class ZabbixService {
     private readonly policy: QueryPolicy,
   ) {}
 
+  /**
+   * Resolves hosts by name, by host group, or by both.
+   *
+   * The group path exists because a report about an estate names no host: a
+   * monthly summary is asked for without saying which machines it covers, and
+   * the set has to come from somewhere other than the question. Searching by
+   * name cannot express it -- there is no query string that means "everything
+   * in production".
+   */
   async findHosts(input: FindHostsInput): Promise<Record<string, unknown>> {
-    const limit = clampLimit(input.limit, 50, 10);
+    const query = input.query?.trim();
+    const requested = input.group_ids ?? [];
+    if (!query && requested.length === 0) {
+      throw new AppError(
+        "QUERY_OR_GROUP_REQUIRED",
+        "Provide a name to search for, a host group to list, or both",
+      );
+    }
+
+    const { groupIds, excluded } = this.resolveGroupFilter(requested);
+    // Listing a group means returning the group, while a name search exists to
+    // disambiguate one host, so they do not want the same default.
+    const limit = clampLimit(input.limit, 50, query ? 10 : 20);
     const params: Record<string, unknown> = {
       output: ["hostid", "host", "name", "status"],
       selectHostGroups: ["groupid", "name"],
-      search: {
-        host: input.query,
-        name: input.query,
-      },
-      searchByAny: true,
       sortfield: "name",
       limit,
     };
 
-    if (this.policy.allowedHostGroupIds.length > 0) {
-      params.groupids = this.policy.allowedHostGroupIds;
+    if (query) {
+      params.search = { host: query, name: query };
+      params.searchByAny = true;
+    }
+    if (groupIds.length > 0) {
+      params.groupids = groupIds;
     }
 
     const hosts = await this.api.request<ZabbixHost[]>("host.get", params);
     return {
       tool_call_id: randomUUID(),
-      query: input.query,
+      query: query ?? null,
+      group_ids: groupIds.length > 0 ? groupIds : null,
+      // Named so a caller can say which part of the request went unanswered
+      // rather than quietly reporting on fewer hosts than it was asked about.
+      excluded_group_ids: excluded.length > 0 ? excluded : null,
       hosts: hosts.map((host) => ({
         host_id: host.hostid,
         host: host.host,
@@ -260,7 +287,42 @@ export class ZabbixService {
           name: group.name,
         })),
       })),
+      result_count: hosts.length,
+      truncated: hosts.length === limit,
     };
+  }
+
+  /**
+   * Narrows the requested groups to those the server is configured to expose.
+   *
+   * The allowlist is the boundary the whole server rests on, so a caller asking
+   * for a group outside it gets nothing from that group rather than having its
+   * request widened. Asking only for groups outside it is an error, not an
+   * empty result: silently returning no hosts would read as "the group is
+   * empty", which is a different fact.
+   */
+  private resolveGroupFilter(requested: string[]): {
+    groupIds: string[];
+    excluded: string[];
+  } {
+    const allowed = this.policy.allowedHostGroupIds;
+    if (requested.length === 0) {
+      return { groupIds: allowed, excluded: [] };
+    }
+    if (allowed.length === 0) {
+      return { groupIds: requested, excluded: [] };
+    }
+
+    const groupIds = requested.filter((id) => allowed.includes(id));
+    const excluded = requested.filter((id) => !allowed.includes(id));
+    if (groupIds.length === 0) {
+      throw new AppError(
+        "HOST_GROUP_NOT_ALLOWED",
+        "None of the requested host groups are within the configured allowlist",
+        { status: 403, details: { requested_group_ids: requested } },
+      );
+    }
+    return { groupIds, excluded };
   }
 
   async getIncidentEvents(

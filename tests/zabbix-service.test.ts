@@ -88,6 +88,79 @@ describe("ZabbixService", () => {
     expect(api.calls[0]?.params.groupids).toEqual(["10"]);
   });
 
+  it("lists a host group so an estate-wide request can find its subjects", async () => {
+    const api = new MockZabbixApi({
+      "host.get": () => [allowedHost, { ...allowedHost, hostid: "10085", host: "Java-2" }],
+    });
+    const service = new ZabbixService(api, makePolicy());
+
+    const result = await service.findHosts({ group_ids: ["10"] });
+
+    expect(api.calls[0]?.params).toMatchObject({ groupids: ["10"] });
+    // No name to search on: the group is the whole selection.
+    expect(api.calls[0]?.params.search).toBeUndefined();
+    expect(result).toMatchObject({
+      query: null,
+      group_ids: ["10"],
+      result_count: 2,
+      truncated: false,
+    });
+  });
+
+  // The allowlist is the boundary the server rests on, so a caller cannot widen
+  // its own reach by naming a group outside it.
+  it("narrows requested groups to the allowlist and says which it dropped", async () => {
+    const api = new MockZabbixApi({ "host.get": () => [allowedHost] });
+    const service = new ZabbixService(api, makePolicy({ allowedHostGroupIds: ["10", "11"] }));
+
+    const result = await service.findHosts({ group_ids: ["10", "99"] });
+
+    expect(api.calls[0]?.params).toMatchObject({ groupids: ["10"] });
+    expect(result).toMatchObject({ group_ids: ["10"], excluded_group_ids: ["99"] });
+  });
+
+  it("refuses a request for groups that are all outside the allowlist", async () => {
+    const api = new MockZabbixApi({ "host.get": () => [] });
+    const service = new ZabbixService(api, makePolicy({ allowedHostGroupIds: ["10"] }));
+
+    // Not an empty result: that would read as "the group has no hosts", which
+    // is a different fact from "you may not look there".
+    await expect(service.findHosts({ group_ids: ["99"] })).rejects.toMatchObject({
+      code: "HOST_GROUP_NOT_ALLOWED",
+      status: 403,
+    });
+    expect(api.calls).toHaveLength(0);
+  });
+
+  it("still searches by name, and reports when the result was cut short", async () => {
+    const api = new MockZabbixApi({
+      "host.get": () => Array.from({ length: 10 }, (_, index) => ({
+        ...allowedHost,
+        hostid: String(20000 + index),
+      })),
+    });
+    const service = new ZabbixService(api, makePolicy());
+
+    const result = await service.findHosts({ query: "Java" });
+
+    expect(api.calls[0]?.params).toMatchObject({
+      search: { host: "Java", name: "Java" },
+      searchByAny: true,
+      limit: 10,
+    });
+    expect(result).toMatchObject({ query: "Java", truncated: true });
+  });
+
+  it("requires something to select on", async () => {
+    const api = new MockZabbixApi({ "host.get": () => [] });
+    const service = new ZabbixService(api, makePolicy());
+
+    await expect(service.findHosts({})).rejects.toMatchObject({
+      code: "QUERY_OR_GROUP_REQUIRED",
+    });
+    expect(api.calls).toHaveLength(0);
+  });
+
   it("aggregates history in the MCP instead of delegating arithmetic to the Agent", async () => {
     const from = Date.parse("2026-07-30T01:00:00Z") / 1_000;
     const api = new MockZabbixApi({
