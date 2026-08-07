@@ -107,7 +107,11 @@ export function loadConfig(): AppConfig {
     },
     policy: {
       maxWindowHours: integer("INVESTIGATION_MAX_WINDOW_HOURS", 26),
-      longTermMaxDays: integer("INVESTIGATION_LONG_TERM_MAX_DAYS", 30),
+      // 32 rather than 30 so a calendar month always fits. Seven months of the
+      // year are 31 days, and a report covering one of those was refused
+      // outright by a 30-day ceiling; the spare day absorbs a window whose
+      // bounds land a moment either side of the month.
+      longTermMaxDays: integer("INVESTIGATION_LONG_TERM_MAX_DAYS", 32),
       maxEvents: integer("INVESTIGATION_MAX_EVENTS", 100),
       maxItemsPerCall: integer("INVESTIGATION_MAX_ITEMS_PER_CALL", 20),
       maxHistoryPoints: integer(
