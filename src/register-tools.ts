@@ -118,7 +118,7 @@ export function registerTools(
     {
       title: "Get aggregated metric summaries",
       description:
-        "Retrieve and deterministically aggregate numeric metrics. The Agent chooses the window and aggregation. Use long_term_capacity only for capacity or slow trend analysis and use at least 1h aggregation.",
+        "Retrieve and deterministically aggregate numeric metrics, returning per-series statistics: min, max, avg, first, last, change percent and trend. This is the survey step -- read the statistics, and call get_metric_history for the one metric whose shape you then need to see. Use long_term_capacity only for capacity or slow trend analysis and use at least 1h aggregation. include_points adds every aggregated bucket to the response and is off by default: the buckets are large, they stay in the conversation for the rest of the investigation, and get_metric_history already returns them for a chosen metric.",
       inputSchema: {
         host_id: zabbixId,
         item_ids: z.array(zabbixId).min(1).max(20),
@@ -131,7 +131,7 @@ export function registerTools(
         data_source: z
           .enum(["auto", "history", "trends"])
           .default("auto"),
-        include_points: z.boolean().default(true),
+        include_points: z.boolean().default(false),
       },
     },
     (input) => resultOf(() => service.getMetricSummary(input)),

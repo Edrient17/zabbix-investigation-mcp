@@ -182,6 +182,7 @@ describe("ZabbixService", () => {
       time_from: "2026-07-30T01:00:00Z",
       time_to: "2026-07-30T01:10:00Z",
       aggregation: "5m",
+      include_points: true,
     });
     const series = result.series as Array<Record<string, unknown>>;
     const first = series[0];
@@ -199,6 +200,48 @@ describe("ZabbixService", () => {
       coverage_ratio: 1,
       partial: false,
     });
+  });
+
+  // Every bucket returned here stays in the caller's conversation and is
+  // re-sent on each turn of the investigation, so the survey step returns
+  // statistics only unless the caller asks for the shape.
+  it("omits the per-bucket points unless they are asked for", async () => {
+    const from = Date.parse("2026-07-30T01:00:00Z") / 1_000;
+    const api = new MockZabbixApi({
+      "host.get": () => [allowedHost],
+      "item.get": () => [cpuItem],
+      "history.get": () =>
+        Array.from({ length: 10 }, (_, index) => ({
+          itemid: "42269",
+          clock: String(from + index * 60),
+          ns: "0",
+          value: String(index + 1),
+        })),
+    });
+    const service = new ZabbixService(api, makePolicy());
+    const ask = async (include_points?: boolean) => {
+      const result = await service.getMetricSummary({
+        host_id: "10084",
+        item_ids: ["42269"],
+        time_from: "2026-07-30T01:00:00Z",
+        time_to: "2026-07-30T01:10:00Z",
+        aggregation: "5m",
+        ...(include_points === undefined ? {} : { include_points }),
+      });
+      return (result.series as Array<Record<string, unknown>>)[0]!;
+    };
+
+    for (const omitted of [await ask(), await ask(false)]) {
+      expect(omitted.points).toEqual([]);
+      expect(omitted.data_quality).toMatchObject({ returned_points: 0 });
+      // The statistics survive: they are what the survey step reads.
+      expect(omitted.summary).toMatchObject({ min: 1, max: 10, avg: 5.5 });
+      // Nothing was truncated, so coverage must not be reported as partial.
+      expect(omitted.data_quality).toMatchObject({ partial: false });
+    }
+
+    const asked = await ask(true);
+    expect((asked.points as unknown[]).length).toBe(2);
   });
 
   it("uses trend data for a long-term capacity query", async () => {
@@ -234,6 +277,7 @@ describe("ZabbixService", () => {
       time_to: "2026-07-02T00:00:00Z",
       aggregation: "1h",
       policy: "long_term_capacity",
+      include_points: true,
     });
     const series = result.series as Array<Record<string, unknown>>;
 
@@ -272,6 +316,7 @@ describe("ZabbixService", () => {
       time_to: "2026-07-02T00:00:00Z",
       aggregation: "1h",
       policy: "long_term_capacity",
+      include_points: true,
     });
     const series = result.series as Array<Record<string, unknown>>;
 

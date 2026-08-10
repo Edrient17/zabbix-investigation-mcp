@@ -666,11 +666,16 @@ export class ZabbixService {
         window.toEpoch,
         interval,
       );
-      const returnedPoints = input.include_points === false
-        ? []
-        : points.slice(0, this.policy.maxHistoryPoints);
-      const responseTruncated = returnedPoints.length < points.length &&
-        input.include_points !== false;
+      // Opt in, not opt out. Every bucket returned here stays in the caller's
+      // conversation for the rest of the investigation and is re-sent on each
+      // turn, while the statistics above are what a survey step actually reads.
+      // get_metric_history exists to return the shape of the one metric that
+      // turns out to matter.
+      const returnedPoints = input.include_points
+        ? points.slice(0, this.policy.maxHistoryPoints)
+        : [];
+      const responseTruncated =
+        Boolean(input.include_points) && returnedPoints.length < points.length;
       const coverage = coverageRatio(points.length, expected);
 
       series.push({
