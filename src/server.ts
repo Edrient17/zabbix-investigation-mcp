@@ -12,7 +12,7 @@ import { ZabbixService } from "./zabbix-service.js";
 const config = loadConfig();
 const logger = new Logger(config.logLevel);
 const api = new ZabbixClient(config.zabbix, logger);
-const service = new ZabbixService(api, config.policy);
+const service = new ZabbixService(api, config.policy, config.defaultTimezone);
 
 function createServer(): McpServer {
   const server = new McpServer({

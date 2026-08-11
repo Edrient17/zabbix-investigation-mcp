@@ -210,6 +210,19 @@ function parseNumber(value: string): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+/**
+ * A moment said twice: the UTC instant, and the wall clock an operator reads.
+ *
+ * The API deals in epoch seconds and everything downstream carried only the
+ * UTC rendering, which a reader takes for a wall clock -- 02:22:40Z looks like
+ * twenty past two. An investigation did exactly that: it took the UTC digits of
+ * an 11:22 incident and asked the log server for 02:22 local, moving the search
+ * nine hours and finding nothing. Saying both leaves nothing to infer.
+ */
+function toLocal(iso: string, timeZone: string): string {
+  return `${new Date(iso).toLocaleString("sv-SE", { timeZone })} (${timeZone})`;
+}
+
 function toIso(clock: string): string {
   return new Date(Number.parseInt(clock, 10) * 1_000).toISOString();
 }
@@ -230,6 +243,9 @@ export class ZabbixService {
   constructor(
     private readonly api: ZabbixApi,
     private readonly policy: QueryPolicy,
+    // The timezone the incident is discussed in, so every moment this server
+    // reports can be read without converting it first.
+    private readonly timezone = "UTC",
   ) {}
 
   /**
@@ -355,6 +371,7 @@ export class ZabbixService {
         from: window.from.toISOString(),
         to: window.to.toISOString(),
       },
+      window_local: `${toLocal(window.from.toISOString(), this.timezone)} ~ ${window.to.toLocaleString("sv-SE", { timeZone: this.timezone })}`,
       events: events.map((event) =>
         this.mapEvent(event, recoveryEvents.get(event.r_eventid ?? "")),
       ),
@@ -575,6 +592,7 @@ export class ZabbixService {
         from: window.from.toISOString(),
         to: window.to.toISOString(),
       },
+      window_local: `${toLocal(window.from.toISOString(), this.timezone)} ~ ${window.to.toLocaleString("sv-SE", { timeZone: this.timezone })}`,
       aggregation: input.aggregation,
       points,
       summary: summarizeSeries(allPoints),
@@ -709,6 +727,7 @@ export class ZabbixService {
         from: window.from.toISOString(),
         to: window.to.toISOString(),
       },
+      window_local: `${toLocal(window.from.toISOString(), this.timezone)} ~ ${window.to.toLocaleString("sv-SE", { timeZone: this.timezone })}`,
       aggregation: input.aggregation,
       policy: policyName,
       requested_data_source: requestedSource,
@@ -779,6 +798,7 @@ export class ZabbixService {
         from: window.from.toISOString(),
         to: window.to.toISOString(),
       },
+      window_local: `${toLocal(window.from.toISOString(), this.timezone)} ~ ${window.to.toLocaleString("sv-SE", { timeZone: this.timezone })}`,
       events: filtered.map((event) =>
         this.mapEvent(event, recoveries.get(event.r_eventid ?? "")),
       ),
@@ -1118,8 +1138,10 @@ export class ZabbixService {
       name: event.name,
       severity: severityName(event.severity),
       started_at: toIso(event.clock),
+      started_at_local: toLocal(toIso(event.clock), this.timezone),
       recovery_event_id: recovery?.eventid ?? null,
       recovered_at: recovery ? toIso(recovery.clock) : null,
+      recovered_at_local: recovery ? toLocal(toIso(recovery.clock), this.timezone) : null,
       acknowledged: event.acknowledged === "1",
       suppressed: event.suppressed === "1",
       cause_event_id:

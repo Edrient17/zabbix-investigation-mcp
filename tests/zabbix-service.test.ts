@@ -471,3 +471,49 @@ describe("ZabbixService", () => {
     expect(eventCall).toBe(2);
   });
 });
+
+describe("saying a moment twice", () => {
+  // 02:22:40Z reads like twenty past two. An investigation took the UTC digits
+  // of an 11:22 incident, asked the log server for 02:22 local, and searched
+  // nine hours from where the incident was -- twice, because the reply it got
+  // back agreed with the misreading. The wall clock beside the instant leaves
+  // nothing to infer.
+  it("reports an event's wall clock beside its UTC instant", async () => {
+    // A fixed moment in the past, so the window policy has nothing to say.
+    const instant = "2026-08-10T02:22:40.000Z";
+    const clock = String(Date.parse(instant) / 1000);
+
+    const api: ZabbixApi = {
+      request: async <T>(method: string) => {
+        if (method === "host.get") {
+          return [{
+            hostid: "11082", host: "vm-1", name: "vm-1", status: "0",
+            hostgroups: [{ groupid: "73", name: "g" }],
+          }] as T;
+        }
+        if (method === "event.get") {
+          return [{
+            eventid: "1", objectid: "9", clock, name: "Container stopped",
+            severity: "3", value: "1", acknowledged: "0", suppressed: "0",
+            tags: [], r_eventid: null,
+          }] as T;
+        }
+        return [] as T;
+      },
+    };
+
+    const service = new ZabbixService(api, makePolicy({ allowedHostGroupIds: [] }), "Asia/Seoul");
+    const result = (await service.getIncidentEvents({
+      host_id: "11082",
+      time_from: "2026-08-10T00:00:00Z",
+      time_to: "2026-08-10T12:00:00Z",
+      include_recovery: false,
+    })) as { events: Array<{ started_at: string; started_at_local: string }> };
+
+    const event = result.events[0]!;
+    expect(event.started_at).toBe(instant);
+    // The same moment, nine hours later on the clock -- which is the whole
+    // point of printing both.
+    expect(event.started_at_local).toBe("2026-08-10 11:22:40 (Asia/Seoul)");
+  });
+});
