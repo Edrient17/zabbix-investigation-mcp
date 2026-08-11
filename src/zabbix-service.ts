@@ -7,6 +7,7 @@ import {
   summarizeSeries,
 } from "./aggregation.js";
 import { AppError } from "./errors.js";
+import { runRawQuery, type RawQueryInput } from "./raw-query.js";
 import {
   clampLimit,
   getAggregationSeconds,
@@ -788,6 +789,26 @@ export class ZabbixService {
 
   private coverageIsInsufficient(coverage: number | null): boolean {
     return coverage !== null && coverage < this.policy.minCoverageRatio;
+  }
+
+  /**
+   * A direct read against the Zabbix API for the questions the typed tools do
+   * not anticipate.
+   *
+   * The tools above return what an investigation usually needs, already shaped
+   * and aggregated. This returns whatever a `.get` returns, so a caller can ask
+   * for a field nobody thought to expose -- at the cost of reading raw API
+   * output and its own bookkeeping. The host group allowlist still holds: it is
+   * pushed into the query rather than applied to the answer.
+   */
+  async rawQuery(input: RawQueryInput): Promise<Record<string, unknown>> {
+    return runRawQuery(
+      this.api,
+      this.policy,
+      input,
+      (hostId) => this.assertHostAllowed(hostId),
+      this.policy.maxRawResultChars,
+    );
   }
 
   private async assertHostAllowed(hostId: string): Promise<ZabbixHost> {

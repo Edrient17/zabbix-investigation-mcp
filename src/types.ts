@@ -17,6 +17,10 @@ export interface QueryPolicy {
    */
   minCoverageRatio: number;
   allowedHostGroupIds: string[];
+  /** Rows a single direct read may return before it is cut short. */
+  maxRawRows: number;
+  /** Characters a direct read may return, whatever the row count. */
+  maxRawResultChars: number;
 }
 
 export type QueryPolicyName = "standard" | "long_term_capacity";

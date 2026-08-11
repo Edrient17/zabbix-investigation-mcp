@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import * as z from "zod/v4";
 import { errorPayload } from "./errors.js";
+import { allowedMethods } from "./raw-query.js";
 import { aggregationValues } from "./types.js";
 import type { ZabbixService } from "./zabbix-service.js";
 
@@ -180,5 +181,32 @@ export function registerTools(
       },
     },
     (input) => resultOf(() => service.getRelatedEvents(input)),
+  );
+
+  server.registerTool(
+    "query_zabbix",
+    {
+      title: "Read any allowed Zabbix object directly",
+      description:
+        "Call a Zabbix `.get` method with your own parameters, for the field or object the tools above do not cover -- host inventory, item configuration, template contents, or auditlog.get to find out who changed Zabbix shortly before an alert. " +
+        "Prefer the tools above when one fits: they aggregate, they bound the reply, and they return figures already computed. This returns raw API output, so you pay for the fields you ask for -- name them in `output` rather than taking everything. " +
+        "Only `.get` methods are reachable; nothing here can modify Zabbix. Results stay inside this deployment's host group allowlist, which is applied to the query itself, and both the row count and the reply size are capped. " +
+        "Allowed methods: " + allowedMethods().join(", ") + ".",
+      inputSchema: {
+        method: z
+          .string()
+          .trim()
+          .min(1)
+          .max(60)
+          .describe("Zabbix API method, e.g. host.get or auditlog.get"),
+        params: z
+          .record(z.string(), z.unknown())
+          .optional()
+          .describe(
+            "Parameters for the method, exactly as the Zabbix API documents them. Set `output` to the fields you actually need. `groupids` is intersected with the allowlist; `limit` is capped.",
+          ),
+      },
+    },
+    (input) => resultOf(() => service.rawQuery(input)),
   );
 }

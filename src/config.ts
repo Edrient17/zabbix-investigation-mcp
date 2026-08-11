@@ -125,6 +125,8 @@ export function loadConfig(): AppConfig {
       maxFutureHours: integer("INVESTIGATION_MAX_FUTURE_HOURS", 2),
       minCoverageRatio: ratio("INVESTIGATION_MIN_COVERAGE_RATIO", 0.95),
       allowedHostGroupIds: csv("ZABBIX_ALLOWED_HOST_GROUP_IDS"),
+      maxRawRows: integer("INVESTIGATION_MAX_RAW_ROWS", 50),
+      maxRawResultChars: integer("INVESTIGATION_MAX_RAW_RESULT_CHARS", 12_000),
     },
     defaultTimezone: process.env.DEFAULT_TIMEZONE?.trim() || "Asia/Seoul",
     logLevel: logLevel as AppConfig["logLevel"],

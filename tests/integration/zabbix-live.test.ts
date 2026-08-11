@@ -58,6 +58,8 @@ const policy: QueryPolicy = {
   maxFutureHours: 2,
   minCoverageRatio: 0.95,
   allowedHostGroupIds: [],
+    maxRawRows: 50,
+    maxRawResultChars: 12_000,
 };
 
 const HOUR_MS = 3_600_000;

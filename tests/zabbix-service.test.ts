@@ -41,6 +41,8 @@ function makePolicy(
     maxFutureHours: 2,
     minCoverageRatio: 0.95,
     allowedHostGroupIds: ["10"],
+    maxRawRows: 50,
+    maxRawResultChars: 12_000,
     ...overrides,
   };
 }

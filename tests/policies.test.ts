@@ -13,6 +13,8 @@ const policy: QueryPolicy = {
   maxFutureHours: 2,
   minCoverageRatio: 0.95,
   allowedHostGroupIds: [],
+    maxRawRows: 50,
+    maxRawResultChars: 12_000,
 };
 
 const now = new Date("2026-07-30T12:00:00Z");

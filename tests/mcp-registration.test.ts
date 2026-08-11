@@ -24,6 +24,8 @@ describe("MCP tool registration", () => {
       maxFutureHours: 2,
       minCoverageRatio: 0.95,
       allowedHostGroupIds: [],
+    maxRawRows: 50,
+    maxRawResultChars: 12_000,
     });
     const server = new McpServer({
       name: "registration-test",
@@ -50,6 +52,10 @@ describe("MCP tool registration", () => {
       "get_related_events",
       "get_trigger_details",
       "list_relevant_metrics",
+      // The escape hatch. Reads only, and only the methods on its own list --
+      // the write methods are absent rather than refused, so no rejection path
+      // has to be correct for Zabbix to stay unmodified.
+      "query_zabbix",
     ]);
 
     await client.close();
