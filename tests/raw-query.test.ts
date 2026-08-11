@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { allowedMethods, runRawQuery } from "../src/raw-query.js";
+import { allowedMethods, runRawQuery, selectMethods } from "../src/raw-query.js";
 import type { QueryPolicy, ZabbixApi } from "../src/types.js";
 
 function makePolicy(overrides: Partial<QueryPolicy> = {}): QueryPolicy {
@@ -15,6 +15,7 @@ function makePolicy(overrides: Partial<QueryPolicy> = {}): QueryPolicy {
     allowedHostGroupIds: ["73"],
     maxRawRows: 50,
     maxRawResultChars: 12_000,
+    rawQueryMethods: [],
     ...overrides,
   };
 }
@@ -161,5 +162,36 @@ describe("reply bounds", () => {
     await expect(
       runRawQuery(api, makePolicy(), { method: "host.get", params: { countOutput: true } }, allowAll, 12_000),
     ).rejects.toThrow(/countOutput/);
+  });
+});
+
+describe("matching what the Zabbix role permits", () => {
+  // A Zabbix role carries its own API allowlist. Offering a method it refuses
+  // costs a call to find out, so a deployment declares the subset it has.
+  it("offers only the declared subset", async () => {
+    const policy = makePolicy({ rawQueryMethods: ["host.get", "item.get"] });
+    expect(allowedMethods(selectMethods(policy.rawQueryMethods))).toEqual([
+      "host.get",
+      "item.get",
+    ]);
+
+    const { api, calls } = recorder();
+    await expect(
+      runRawQuery(api, policy, { method: "auditlog.get" }, allowAll, 12_000),
+    ).rejects.toThrow(/not available/);
+    expect(calls).toHaveLength(0);
+
+    await runRawQuery(api, policy, { method: "host.get" }, allowAll, 12_000);
+    expect(calls).toHaveLength(1);
+  });
+
+  it("offers everything it knows when nothing is declared", () => {
+    expect(allowedMethods(selectMethods([])).length).toBeGreaterThan(2);
+  });
+
+  // A typo that quietly drops a method leaves a deployment with less than it
+  // believes it configured, and nothing to read that says so.
+  it("refuses to start on a name it does not know", () => {
+    expect(() => selectMethods(["host.get", "hosts.get"])).toThrow(/does not support/);
   });
 });

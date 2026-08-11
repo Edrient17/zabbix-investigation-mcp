@@ -42,8 +42,40 @@ export interface RawQueryInput {
   params?: Record<string, unknown>;
 }
 
-export function allowedMethods(): string[] {
-  return Object.keys(READ_METHODS).sort();
+/**
+ * Narrows the offered methods to the ones this deployment's Zabbix role will
+ * actually answer.
+ *
+ * A Zabbix role carries its own API method allowlist, and a method it refuses
+ * costs a call to discover -- the tool would advertise ten methods, the model
+ * would try one, and Zabbix would say "No permissions to call". Declaring the
+ * subset here means the model is never offered what it cannot have.
+ *
+ * The map above stays the authority on how each method is confined to allowed
+ * hosts, so this only ever removes. An unknown name is a configuration error
+ * rather than a silent omission: it usually means a typo, and a typo that
+ * quietly drops a method is how a deployment ends up with less than it thinks.
+ */
+export function selectMethods(requested: string[]): Record<string, "group" | "host" | "none"> {
+  if (requested.length === 0) return READ_METHODS;
+
+  const unknown = requested.filter((name) => !(name in READ_METHODS));
+  if (unknown.length > 0) {
+    throw new AppError(
+      "CONFIG_ERROR",
+      "ZABBIX_RAW_QUERY_METHODS names methods this server does not support",
+      { status: 500, details: { unknown, supported: Object.keys(READ_METHODS).sort() } },
+    );
+  }
+  return Object.fromEntries(
+    requested.map((name) => [name, READ_METHODS[name]!]),
+  ) as Record<string, "group" | "host" | "none">;
+}
+
+export function allowedMethods(
+  methods: Record<string, "group" | "host" | "none"> = READ_METHODS,
+): string[] {
+  return Object.keys(methods).sort();
 }
 
 function asIdArray(value: unknown): string[] | null {
@@ -65,13 +97,14 @@ export async function runRawQuery(
   assertHostAllowed: (hostId: string) => Promise<unknown>,
   maxResultChars: number,
 ): Promise<Record<string, unknown>> {
+  const methods = selectMethods(policy.rawQueryMethods);
   const method = input.method.trim();
-  const scope = READ_METHODS[method];
+  const scope = methods[method];
   if (!scope) {
     throw new AppError(
       "METHOD_NOT_ALLOWED",
       "That Zabbix method is not available through this tool",
-      { status: 403, details: { requested: method, allowed: allowedMethods() } },
+      { status: 403, details: { requested: method, allowed: allowedMethods(methods) } },
     );
   }
 

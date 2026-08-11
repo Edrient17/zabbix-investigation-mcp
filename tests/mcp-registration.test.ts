@@ -26,6 +26,7 @@ describe("MCP tool registration", () => {
       allowedHostGroupIds: [],
     maxRawRows: 50,
     maxRawResultChars: 12_000,
+    rawQueryMethods: [],
     });
     const server = new McpServer({
       name: "registration-test",

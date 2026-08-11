@@ -19,7 +19,7 @@ function createServer(): McpServer {
     name: "zabbix-readonly-aiops",
     version: "0.1.0",
   });
-  registerTools(server, service);
+  registerTools(server, service, config.policy.rawQueryMethods);
   return server;
 }
 

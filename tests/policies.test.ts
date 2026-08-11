@@ -15,6 +15,7 @@ const policy: QueryPolicy = {
   allowedHostGroupIds: [],
     maxRawRows: 50,
     maxRawResultChars: 12_000,
+    rawQueryMethods: [],
 };
 
 const now = new Date("2026-07-30T12:00:00Z");

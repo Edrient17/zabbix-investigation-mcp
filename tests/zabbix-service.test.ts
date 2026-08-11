@@ -43,6 +43,7 @@ function makePolicy(
     allowedHostGroupIds: ["10"],
     maxRawRows: 50,
     maxRawResultChars: 12_000,
+    rawQueryMethods: [],
     ...overrides,
   };
 }

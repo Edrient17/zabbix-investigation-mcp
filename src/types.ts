@@ -21,6 +21,12 @@ export interface QueryPolicy {
   maxRawRows: number;
   /** Characters a direct read may return, whatever the row count. */
   maxRawResultChars: number;
+  /**
+   * Which methods the direct read offers. Empty means every method this server
+   * knows how to confine; a shorter list matches a Zabbix role that permits
+   * fewer, so the model is never offered one that would be refused.
+   */
+  rawQueryMethods: string[];
 }
 
 export type QueryPolicyName = "standard" | "long_term_capacity";

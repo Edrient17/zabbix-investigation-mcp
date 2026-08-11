@@ -60,6 +60,7 @@ const policy: QueryPolicy = {
   allowedHostGroupIds: [],
     maxRawRows: 50,
     maxRawResultChars: 12_000,
+    rawQueryMethods: [],
 };
 
 const HOUR_MS = 3_600_000;

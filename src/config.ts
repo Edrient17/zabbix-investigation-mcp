@@ -127,6 +127,7 @@ export function loadConfig(): AppConfig {
       allowedHostGroupIds: csv("ZABBIX_ALLOWED_HOST_GROUP_IDS"),
       maxRawRows: integer("INVESTIGATION_MAX_RAW_ROWS", 50),
       maxRawResultChars: integer("INVESTIGATION_MAX_RAW_RESULT_CHARS", 12_000),
+      rawQueryMethods: csv("ZABBIX_RAW_QUERY_METHODS"),
     },
     defaultTimezone: process.env.DEFAULT_TIMEZONE?.trim() || "Asia/Seoul",
     logLevel: logLevel as AppConfig["logLevel"],
