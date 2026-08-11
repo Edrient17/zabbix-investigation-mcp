@@ -17,6 +17,12 @@ import type { QueryPolicy, ZabbixApi } from "./types.js";
  *              before the call goes out.
  *   `none`   - describes Zabbix itself rather than monitored hosts, so host
  *              grouping does not apply. Kept deliberately short.
+ *
+ * A method belongs here only if one of those three confinements fits it.
+ * `service.get` was tried and removed: it accepts no groupids, so the injection
+ * made Zabbix reject the call outright, and business services reference
+ * triggers across hosts, so `none` would have offered a way around the
+ * allowlist rather than a gap in it.
  */
 const READ_METHODS: Record<string, "group" | "host" | "none"> = {
   "host.get": "group",
@@ -27,7 +33,6 @@ const READ_METHODS: Record<string, "group" | "host" | "none"> = {
   "problem.get": "group",
   "graph.get": "group",
   "httptest.get": "group",
-  "service.get": "group",
   "hostinterface.get": "host",
   "dashboard.get": "none",
   "template.get": "none",

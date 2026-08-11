@@ -195,3 +195,14 @@ describe("matching what the Zabbix role permits", () => {
     expect(() => selectMethods(["host.get", "hosts.get"])).toThrow(/does not support/);
   });
 });
+
+describe("only methods this server can actually confine", () => {
+  // Every group-scoped method has to accept groupids, or the injection turns a
+  // working query into "Invalid params". service.get looked group-shaped, took
+  // no groupids, and failed against the real API for exactly that reason.
+  it("scopes by group only where groupids is a real parameter", () => {
+    const known = allowedMethods(selectMethods([]));
+    expect(known).not.toContain("service.get");
+    expect(known).toContain("host.get");
+  });
+});
