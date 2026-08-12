@@ -15,9 +15,48 @@ Agent가 조사할 호스트·메트릭·시간 범위·집계 간격을 결정�
 - `get_metric_summary`
 - `get_metric_history`
 - `get_related_events`
+- `query_zabbix` — 위 도구들이 모양을 잡아 주지 않는 질문을 위한 통로. 아래에서
+  따로 설명합니다.
 
 Zabbix 설정 변경, 이벤트 확인 처리, 스크립트 및 원격 명령 실행 도구는 제공하지
 않습니다.
+
+### 시각은 두 가지로 돌아옵니다
+
+이벤트와 조회 구간에는 `started_at`·`recovered_at`·`window`(UTC)와 함께
+`started_at_local`·`recovered_at_local`·`window_local`이 붙습니다.
+
+```json
+{ "started_at": "2026-08-11T02:22:40.000Z",
+  "started_at_local": "2026-08-11 11:22:40 (Asia/Seoul)" }
+```
+
+UTC 하나만 주면 `02:22:40Z`를 새벽 2시로 읽고 다른 도구에 `02:22+09:00`으로
+넘기는 일이 생깁니다. 조회는 9시간 어긋난 채 **성공하고**, 빈 결과가 "그때는
+조용했다"로 읽힙니다. 시각을 만들어 내는 쪽에서 두 표기를 함께 주면 추론할
+일이 없어집니다. 표기할 때는 `_local`을, 다른 도구에 넘길 때는 `Z` 쪽을 씁니다.
+
+### `query_zabbix` — 임의 `.get` 메서드 통로
+
+전용 도구가 답할 수 없는 질문("이 호스트에 어떤 템플릿이 붙어 있나", "이
+트리거의 원문 식은 무엇인가")을 위해 Zabbix `.get` 메서드를 그대로 호출합니다.
+쓰기 메서드는 목록에 없어서 도달하지 않습니다.
+
+넘겨준 파라미터를 그대로 보내지 않고 **경계를 질의 안으로 밀어 넣습니다.**
+
+| 메서드 | 제한 방식 |
+|---|---|
+| `host.get` `hostgroup.get` `item.get` `trigger.get` `event.get` `problem.get` `graph.get` `httptest.get` | `groupids`를 허용 그룹과 교집합해서 주입 |
+| `hostinterface.get` | `hostids`가 필수이며 호스트마다 접근 권한 확인 |
+| `dashboard.get` `template.get` `usermacro.get` `auditlog.get` | 호스트에 매이지 않아 그룹 제한이 성립하지 않음 |
+
+교집합이 비면 **오류를 냅니다.** 빈 결과로 돌려주면 "그 그룹에 아무것도 없다"로
+읽히고, 제한을 풀어 전체를 돌려주면 경계가 조용히 사라집니다.
+
+응답은 행 수(`INVESTIGATION_MAX_RAW_ROWS`)와 문자
+수(`INVESTIGATION_MAX_RAW_RESULT_CHARS`) 양쪽으로 자릅니다. 모든 필드를 선택한 한 행이 좁은 백 행보다 클 수 있어서 행
+수만으로는 상한이 되지 않습니다. `params_applied`에는 **받은 질의가 아니라
+실제로 보낸 질의**가 담깁니다.
 
 ## 환경 변수
 
@@ -40,6 +79,23 @@ Copy-Item .env.example .env
   그룹이 전부 목록 밖이면 빈 결과가 아니라 오류를 냅니다 — 빈 결과는 "그
   그룹에 호스트가 없다"로 읽히는데 그건 다른 사실입니다.
 - `ZABBIX_MCP_AUTH_TOKEN`: MCP 클라이언트가 사용할 Bearer Token
+
+선택 설정:
+
+- `ZABBIX_RAW_QUERY_METHODS`: `query_zabbix`가 제공할 메서드 목록. **Zabbix
+  역할이 실제로 허용하는 것만 적습니다.** 역할이 거부하는 메서드를 목록에 두면
+  호출을 한 번 해 봐야 알 수 있고, 그 왕복은 조사 시간에서 나갑니다. 비워 두면
+  서버가 아는 전부를 제공합니다.
+
+  서버가 모르는 이름이 있으면 **기동하지 않고 오류를 냅니다.** 오타 하나를
+  조용히 버리면 설정했다고 믿는 것보다 적은 권한으로 돌아가고, 그 사실을 알려
+  주는 곳이 없습니다.
+- `DEFAULT_TIMEZONE` (기본 `Asia/Seoul`): `..._local` 표기에 쓰는 시간대.
+- `INVESTIGATION_MAX_RAW_ROWS` (기본 `50`),
+  `INVESTIGATION_MAX_RAW_RESULT_CHARS` (기본 `12000`)
+
+나머지 한도(`INVESTIGATION_MAX_WINDOW_HOURS`, `INVESTIGATION_MAX_EVENTS` 등)는
+`.env.example`에 기본값과 함께 주석으로 설명해 두었습니다.
 
 `ZABBIX_MCP_AUTH_TOKEN`은 길고 무작위인 값을 사용합니다.
 
@@ -144,11 +200,29 @@ npm run test:integration
 - 대상 호스트에 이벤트가 없으면 이벤트 관련 단정은 건너뛰고, 나머지 계약과
   가드레일은 그대로 검증합니다.
 
-토큰에는 최소 권한으로 다음 6개 메서드만 허용하면 충분합니다.
+## 토큰 권한
+
+Zabbix 역할(User role)의 **API methods**를 `Allow list`로 두고 필요한 메서드만
+체크합니다. 전용 도구 7개는 다음 6개면 동작합니다.
 
 ```text
 host.get  event.get  trigger.get  item.get  history.get  trend.get
 ```
+
+`query_zabbix`까지 쓰려면 제공하려는 메서드를 역할에도 함께 허용하고, 같은
+목록을 `ZABBIX_RAW_QUERY_METHODS`에 적습니다. 현재 배포에서 쓰는 조합입니다.
+
+```text
+hostgroup.get  hostinterface.get  problem.get  graph.get
+httptest.get   dashboard.get      template.get usermacro.get
+```
+
+`auditlog.get`은 메서드 허용만으로는 부족하고 **감사 로그를 읽을 수 있는 사용자
+유형**이 필요합니다. 그래서 기본 목록에서 빠져 있습니다.
+
+역할에는 읽기 권한만 두고, 호스트 그룹 접근은 `ZABBIX_ALLOWED_HOST_GROUP_IDS`와
+Zabbix 쪽 권한 **양쪽에서** 좁힙니다. 이 서버의 그룹 제한은 편의를 위한 것이지
+Zabbix 권한을 대신하지 않습니다.
 
 ## 집계 정책
 
