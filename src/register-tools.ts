@@ -63,7 +63,7 @@ export function registerTools(
     {
       title: "Find Zabbix hosts",
       description:
-        "Resolve which hosts to investigate. Give query to search allowlisted hosts by technical or display name. Give group_ids to list the hosts belonging to those host groups, which is how an investigation covering a whole estate finds its subjects when the request names no host. Both may be given together to search within groups. At least one is required. Never choose a host when several plausible candidates remain for one name.",
+        "Resolve host names to Zabbix host IDs, which the other tools take. query searches allowlisted hosts by technical or display name; group_ids lists the hosts in those host groups; both together search within the groups. At least one is required. Returns every match, including several for one query.",
       inputSchema: {
         query: z.string().trim().min(1).max(200).optional(),
         group_ids: z.array(zabbixId).min(1).max(20).optional(),
@@ -78,7 +78,7 @@ export function registerTools(
     {
       title: "Get incident events",
       description:
-        "Retrieve trigger problem events and their recovery events for one host in a bounded time window. Use this before selecting detailed metrics.",
+        "Retrieve trigger problem events and their recovery events for one host in a bounded time window. Filter by severity; include_recovery controls whether recovery events are paired in.",
       inputSchema: {
         host_id: zabbixId,
         time_from: isoTime,
@@ -109,7 +109,7 @@ export function registerTools(
     {
       title: "List relevant numeric metrics",
       description:
-        "Rank numeric items on a host using incident-specific keywords. The investigation Agent chooses the keywords; this tool performs deterministic catalog filtering and ranking.",
+        "Rank a host's numeric items against the supplied keywords, matching item name and key. Returns item_id, name, key, value type and units for the highest ranked, which the metric tools then take.",
       inputSchema: {
         host_id: zabbixId,
         keywords: z.array(z.string().trim().min(1).max(100)).min(1).max(20),
@@ -124,7 +124,7 @@ export function registerTools(
     {
       title: "Get aggregated metric summaries",
       description:
-        "Retrieve and deterministically aggregate numeric metrics, returning per-series statistics: min, max, avg, first, last, change percent and trend. This is the survey step -- read the statistics, and call get_metric_history for the one metric whose shape you then need to see. Use long_term_capacity only for capacity or slow trend analysis and use at least 1h aggregation. include_points adds every aggregated bucket to the response and is off by default: the buckets are large, they stay in the conversation for the rest of the investigation, and get_metric_history already returns them for a chosen metric.",
+        "Aggregate numeric metrics over a window, returning per-series statistics: min, max, avg, first, last, change percent and trend. Takes item_ids (up to 20) and an aggregation interval. The long_term_capacity policy reads trend data instead of history and requires an interval of 1h or more. include_points adds every aggregated bucket to the reply and is off by default; get_metric_history returns those points for a single item.",
       inputSchema: {
         host_id: zabbixId,
         item_ids: z.array(zabbixId).min(1).max(20),
@@ -148,7 +148,7 @@ export function registerTools(
     {
       title: "Get detailed metric history",
       description:
-        "Retrieve detailed history for one numeric metric after a summary has identified an interesting interval. Choose a coarser aggregation if the point limit would be exceeded.",
+        "Retrieve the aggregated points for a single numeric item over a window. Takes one item_id and an optional max_points; exceeding the point limit is an error rather than a silent truncation.",
       inputSchema: {
         host_id: zabbixId,
         item_id: zabbixId,
@@ -193,9 +193,9 @@ export function registerTools(
     {
       title: "Read any allowed Zabbix object directly",
       description:
-        "Call a Zabbix `.get` method with your own parameters, for the field or object the tools above do not cover -- host inventory, item configuration, template contents, or auditlog.get to find out who changed Zabbix shortly before an alert. " +
-        "Prefer the tools above when one fits: they aggregate, they bound the reply, and they return figures already computed. This returns raw API output, so you pay for the fields you ask for -- name them in `output` rather than taking everything. " +
-        "Only `.get` methods are reachable; nothing here can modify Zabbix. Results stay inside this deployment's host group allowlist, which is applied to the query itself, and both the row count and the reply size are capped. " +
+        "Call a Zabbix `.get` method directly with your own parameters and receive the raw API rows. Only `.get` methods are reachable, so nothing here can modify Zabbix. " +
+        "Group-scoped methods have this deployment's host group allowlist intersected into the query; naming a group outside it is an error rather than an empty result. Host-scoped methods require hostids. " +
+        "The reply is capped by row count and by size, and params_applied reports the query as actually sent. Naming fields in `output` reduces the reply. " +
         "Allowed methods: " + offeredMethods.join(", ") + ".",
       inputSchema: {
         method: z
