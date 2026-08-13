@@ -9,9 +9,9 @@ import type { ZabbixService } from "./zabbix-service.js";
 const zabbixId = z
   .string()
   .regex(/^\d+$/, "Zabbix IDs must contain decimal digits only");
-const isoTime = z
-  .string()
-  .describe("ISO 8601 timestamp including Z or an explicit UTC offset");
+const isoTime = z.iso
+  .datetime({ offset: true })
+  .describe("ISO 8601 date-time including Z or an explicit UTC offset");
 const aggregation = z.enum(aggregationValues);
 const summaryAggregation = z.enum([
   "1m",
@@ -58,12 +58,15 @@ export function registerTools(
   rawQueryMethods: string[] = [],
 ): void {
   const offeredMethods = allowedMethods(selectMethods(rawQueryMethods));
+  const rawMethod = z
+    .enum(offeredMethods as [string, ...string[]])
+    .describe("Read-only Zabbix API method allowed by this deployment");
   server.registerTool(
     "find_hosts",
     {
       title: "Find Zabbix hosts",
       description:
-        "Resolve host names to Zabbix host IDs, which the other tools take. query searches allowlisted hosts by technical or display name; group_ids lists the hosts in those host groups; both together search within the groups. At least one is required. Returns every match, including several for one query.",
+        "Resolve technical or display host names to Zabbix host IDs. query searches allowlisted hosts; group_ids lists hosts in those groups; both together search within the groups. At least one is required. Returns every match, including ambiguous matches.",
       inputSchema: {
         query: z.string().trim().min(1).max(200).optional(),
         group_ids: z.array(zabbixId).min(1).max(20).optional(),
@@ -109,7 +112,7 @@ export function registerTools(
     {
       title: "List relevant numeric metrics",
       description:
-        "Rank a host's numeric items against the supplied keywords, matching item name and key. Returns item_id, name, key, value type and units for the highest ranked, which the metric tools then take.",
+        "Rank a host's numeric items against supplied keywords by item name and key. Returns item_id, name, key, value type and units for the highest-ranked matches.",
       inputSchema: {
         host_id: zabbixId,
         keywords: z.array(z.string().trim().min(1).max(100)).min(1).max(20),
@@ -124,7 +127,7 @@ export function registerTools(
     {
       title: "Get aggregated metric summaries",
       description:
-        "Aggregate numeric metrics over a window, returning per-series statistics: min, max, avg, first, last, change percent and trend. Takes item_ids (up to 20) and an aggregation interval. The long_term_capacity policy reads trend data instead of history and requires an interval of 1h or more. include_points adds every aggregated bucket to the reply and is off by default; get_metric_history returns those points for a single item.",
+        "Aggregate numeric metrics over a window, returning per-series min, max, average, first, last, change percent and trend. Takes up to 20 item_ids and an aggregation interval. The long_term_capacity policy reads trend data and requires an interval of at least 1h. include_points adds aggregated buckets and is disabled by default.",
       inputSchema: {
         host_id: zabbixId,
         item_ids: z.array(zabbixId).min(1).max(20),
@@ -198,12 +201,7 @@ export function registerTools(
         "The reply is capped by row count and by size, and params_applied reports the query as actually sent. Naming fields in `output` reduces the reply. " +
         "Allowed methods: " + offeredMethods.join(", ") + ".",
       inputSchema: {
-        method: z
-          .string()
-          .trim()
-          .min(1)
-          .max(60)
-          .describe("Zabbix API method, e.g. host.get or auditlog.get"),
+        method: rawMethod,
         params: z
           .record(z.string(), z.unknown())
           .optional()
