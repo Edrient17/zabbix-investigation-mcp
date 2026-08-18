@@ -49,7 +49,10 @@ export function validateWindow(
   window: TimeWindow,
   policyName: QueryPolicyName,
   policy: QueryPolicy,
-  aggregation: Aggregation,
+  // Omitted by callers that do not downsample. Event queries read whole rows
+  // and are bounded by the row limit, so the resolution floor below has nothing
+  // to protect there.
+  aggregation?: Aggregation,
   now = new Date(),
 ): ValidatedWindow {
   const from = parseIsoTime(window.from, "time_from");
@@ -83,6 +86,7 @@ export function validateWindow(
 
   if (
     policyName === "long_term_capacity" &&
+    aggregation !== undefined &&
     (aggregationSeconds[aggregation] ?? 0) < 60 * 60
   ) {
     throw new AppError(

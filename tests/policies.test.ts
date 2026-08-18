@@ -65,6 +65,38 @@ describe("query policies", () => {
     ).toThrowError(/at least 1h/);
   });
 
+  it("lets a long-term window through when nothing is being downsampled", () => {
+    // Events carry no aggregation. The resolution floor exists to stop a month
+    // being read at 1m, and applying it to a row query would have made the
+    // long_term_capacity policy unusable for the tools that need it most.
+    const result = validateWindow(
+      {
+        from: "2026-06-30T00:00:00Z",
+        to: "2026-07-30T00:00:00Z",
+      },
+      "long_term_capacity",
+      policy,
+      undefined,
+      now,
+    );
+    expect(result.durationSeconds).toBe(30 * 24 * 3600);
+  });
+
+  it("still refuses a long-term window past the day limit", () => {
+    expect(() =>
+      validateWindow(
+        {
+          from: "2026-01-01T00:00:00Z",
+          to: "2026-07-30T00:00:00Z",
+        },
+        "long_term_capacity",
+        policy,
+        undefined,
+        now,
+      ),
+    ).toThrowError(/exceeds/);
+  });
+
   it("rejects a standard window longer than the configured limit", () => {
     expect(() =>
       validateWindow(

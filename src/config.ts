@@ -111,7 +111,7 @@ export function loadConfig(): AppConfig {
       // year are 31 days, and a report covering one of those was refused
       // outright by a 30-day ceiling; the spare day absorbs a window whose
       // bounds land a moment either side of the month.
-      longTermMaxDays: integer("INVESTIGATION_LONG_TERM_MAX_DAYS", 32),
+      longTermMaxDays: integer("INVESTIGATION_LONG_TERM_MAX_DAYS", 400),
       maxEvents: integer("INVESTIGATION_MAX_EVENTS", 100),
       maxItemsPerCall: integer("INVESTIGATION_MAX_ITEMS_PER_CALL", 20),
       maxHistoryPoints: integer(

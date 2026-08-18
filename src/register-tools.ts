@@ -81,7 +81,7 @@ export function registerTools(
     {
       title: "Get incident events",
       description:
-        "Retrieve trigger problem events and their recovery events for one host in a bounded time window. Filter by severity; include_recovery controls whether recovery events are paired in.",
+        "Retrieve trigger problem events and their recovery events for one host in a time window. Filter by severity; include_recovery controls whether recovery events are paired in. Months-long windows need policy long_term_capacity. The reply carries partial, which is true when the row limit was reached and the count is therefore a floor.",
       inputSchema: {
         host_id: zabbixId,
         time_from: isoTime,
@@ -89,6 +89,13 @@ export function registerTools(
         severities: z.array(severity).max(6).optional(),
         include_recovery: z.boolean().default(true),
         limit: z.number().int().min(1).max(100).optional(),
+        policy: z
+          .enum(["standard", "long_term_capacity"])
+          .default("standard")
+          .describe(
+            "long_term_capacity widens the window for questions that span months. "
+            + "The reply is still capped at the row limit, and partial says whether it was reached.",
+          ),
       },
     },
     (input) => resultOf(() => service.getIncidentEvents(input)),
@@ -169,7 +176,7 @@ export function registerTools(
     {
       title: "Get related events",
       description:
-        "Retrieve neighboring problem and recovery events on the same host, optionally restricted by trigger IDs or exact tags.",
+        "Retrieve neighboring problem and recovery events on the same host, optionally restricted by trigger IDs or exact tags. Months-long windows need policy long_term_capacity; partial is true when the row limit was reached.",
       inputSchema: {
         host_id: zabbixId,
         time_from: isoTime,
@@ -186,6 +193,13 @@ export function registerTools(
           .max(20)
           .optional(),
         limit: z.number().int().min(1).max(100).optional(),
+        policy: z
+          .enum(["standard", "long_term_capacity"])
+          .default("standard")
+          .describe(
+            "long_term_capacity widens the window for questions that span months. "
+            + "The reply is still capped at the row limit, and partial says whether it was reached.",
+          ),
       },
     },
     (input) => resultOf(() => service.getRelatedEvents(input)),

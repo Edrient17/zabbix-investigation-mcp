@@ -163,6 +163,7 @@ export interface GetIncidentEventsInput {
   severities?: Severity[];
   include_recovery?: boolean;
   limit?: number;
+  policy?: QueryPolicyName;
 }
 
 export interface GetTriggerDetailsInput {
@@ -203,6 +204,7 @@ export interface GetRelatedEventsInput {
   trigger_ids?: string[];
   tags?: ZabbixTag[];
   limit?: number;
+  policy?: QueryPolicyName;
 }
 
 function parseNumber(value: string): number | null {
@@ -346,11 +348,11 @@ export class ZabbixService {
     input: GetIncidentEventsInput,
   ): Promise<Record<string, unknown>> {
     await this.assertHostAllowed(input.host_id);
+    const policyName = input.policy ?? "standard";
     const window = validateWindow(
       { from: input.time_from, to: input.time_to },
-      "standard",
+      policyName,
       this.policy,
-      "1m",
     );
     const limit = clampLimit(input.limit, this.policy.maxEvents, 100);
     const events = await this.fetchProblemEvents({
@@ -358,6 +360,7 @@ export class ZabbixService {
       window: { from: input.time_from, to: input.time_to },
       severities: input.severities,
       limit,
+      policyName,
     });
     const recoveryEvents =
       input.include_recovery === false
@@ -741,9 +744,8 @@ export class ZabbixService {
     await this.assertHostAllowed(input.host_id);
     const window = validateWindow(
       { from: input.time_from, to: input.time_to },
-      "standard",
+      input.policy ?? "standard",
       this.policy,
-      "1m",
     );
     const limit = clampLimit(input.limit, this.policy.maxEvents, 100);
     const params: Record<string, unknown> = {
@@ -923,12 +925,12 @@ export class ZabbixService {
     window: TimeWindow;
     severities?: Severity[];
     limit: number;
+    policyName?: QueryPolicyName;
   }): Promise<ZabbixEvent[]> {
     const window = validateWindow(
       options.window,
-      "standard",
+      options.policyName ?? "standard",
       this.policy,
-      "1m",
     );
     const params: Record<string, unknown> = {
       hostids: [options.hostId],

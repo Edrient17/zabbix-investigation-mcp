@@ -472,6 +472,78 @@ describe("ZabbixService", () => {
   });
 });
 
+describe("asking about a month of events", () => {
+  // The 26-hour cap protects time-series volume. Applied to event queries it
+  // was answering "was there anything wrong last month" with one day of last
+  // month, and the reply said nothing about the missing 29.
+  const monthly = {
+    host_id: "10084",
+    time_from: "2026-06-30T00:00:00Z",
+    time_to: "2026-07-30T00:00:00Z",
+  } as const;
+
+  function serviceReturning(events: unknown[]): ZabbixService {
+    const api = new MockZabbixApi({
+      "host.get": () => [allowedHost],
+      "event.get": (params) => ("eventids" in params ? [] : events),
+    });
+    return new ZabbixService(api, makePolicy());
+  }
+
+  function problem(id: number): Record<string, unknown> {
+    return {
+      eventid: String(id),
+      objectid: "14282",
+      clock: String(1_782_000_000 + id),
+      name: "Java process is not running",
+      severity: "4",
+      value: "1",
+      acknowledged: "0",
+      suppressed: "0",
+      acknowledges: [],
+      tags: [],
+    };
+  }
+
+  it("refuses the month under the default policy", async () => {
+    await expect(
+      serviceReturning([]).getIncidentEvents({ ...monthly }),
+    ).rejects.toThrowError(/exceeds/);
+  });
+
+  it("answers the month under long_term_capacity", async () => {
+    const result = await serviceReturning([problem(1)]).getIncidentEvents({
+      ...monthly,
+      policy: "long_term_capacity",
+    });
+    expect(result.result_count).toBe(1);
+    expect(result.partial).toBe(false);
+  });
+
+  it("answers a month of related events under long_term_capacity", async () => {
+    const result = await serviceReturning([problem(1)]).getRelatedEvents({
+      ...monthly,
+      trigger_ids: ["14282"],
+      policy: "long_term_capacity",
+    });
+    expect(result.result_count).toBe(1);
+  });
+
+  it("marks the answer partial when the row limit is what stopped it", async () => {
+    // A month can hold more events than the limit returns. Without this flag
+    // the count reads as the real total, and a report writes "3 events last
+    // month" from a query that stopped at 3.
+    const service = serviceReturning([problem(1), problem(2), problem(3)]);
+    const result = await service.getIncidentEvents({
+      ...monthly,
+      policy: "long_term_capacity",
+      limit: 3,
+    });
+    expect(result.result_count).toBe(3);
+    expect(result.partial).toBe(true);
+  });
+});
+
 describe("saying a moment twice", () => {
   // 02:22:40Z reads like twenty past two. An investigation took the UTC digits
   // of an 11:22 incident, asked the log server for 02:22 local, and searched
