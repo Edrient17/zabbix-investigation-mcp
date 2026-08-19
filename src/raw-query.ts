@@ -171,6 +171,8 @@ export async function runRawQuery(
   const raw = await api.request<unknown>(method, params);
   const rows = Array.isArray(raw) ? raw : [raw];
 
+  const templateVisibility = await describeTemplateVisibility(api, method, params, rows);
+
   // Truncated by characters as well as by rows: one row of an item with every
   // field selected can be larger than a hundred rows of two fields.
   let text = JSON.stringify(rows);
@@ -198,6 +200,55 @@ export async function runRawQuery(
       // Absent when this deployment sets no allowlist, so a caller can tell
       // "everything" from "everything I am allowed to see".
       confined_to_host_groups: allowlist.length > 0 ? allowlist : null,
+      ...templateVisibility,
     },
   };
+}
+
+/**
+ * Whether an empty template answer means "none" or "none you may see".
+ *
+ * Zabbix 6.0 moved templates into their own groups with their own permissions,
+ * so a role granted read on a host group still sees `parentTemplates: []` for a
+ * host that has templates linked. An investigation asked which templates a host
+ * carried, was told none, and reported that as fact -- while two of the host's
+ * own triggers carried a templateid, which is only possible if a template is
+ * linked.
+ *
+ * Costs one extra call, and only when the answer was empty and the question was
+ * about templates. A caller that can see even one template gets nothing added.
+ */
+async function describeTemplateVisibility(
+  api: ZabbixApi,
+  method: string,
+  params: Record<string, unknown>,
+  rows: unknown[],
+): Promise<Record<string, unknown>> {
+  const askedForTemplates =
+    method === "template.get" || "selectParentTemplates" in params;
+  if (!askedForTemplates) {
+    return {};
+  }
+  const empty =
+    method === "template.get"
+      ? rows.length === 0
+      : rows.every(
+          (row) =>
+            !Array.isArray((row as Record<string, unknown>)?.parentTemplates) ||
+            ((row as Record<string, unknown>).parentTemplates as unknown[]).length === 0,
+        );
+  if (!empty) {
+    return {};
+  }
+  try {
+    const probe = await api.request<unknown[]>("template.get", {
+      output: ["templateid"],
+      limit: 1,
+    });
+    return { templates_visible: Array.isArray(probe) && probe.length > 0 };
+  } catch {
+    // The probe is an annotation, not the answer. A caller that cannot make it
+    // is no worse off than before it existed.
+    return {};
+  }
 }

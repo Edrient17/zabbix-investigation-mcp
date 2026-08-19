@@ -206,3 +206,99 @@ describe("only methods this server can actually confine", () => {
     expect(known).toContain("host.get");
   });
 });
+
+describe("templates you cannot see", () => {
+  /**
+   * Zabbix 6.0 moved templates into their own groups with their own
+   * permissions. A role granted read on a host group still sees an empty
+   * parentTemplates for a host that has templates linked, and an investigation
+   * reported that as "0 templates" -- while two of the host's triggers carried
+   * a templateid, which only happens when a template is linked.
+   */
+  const policy: QueryPolicy = {
+    maxWindowHours: 26,
+    longTermMaxDays: 400,
+    maxEvents: 100,
+    maxItemsPerCall: 20,
+    maxHistoryPoints: 1_000,
+    maxSourcePoints: 50_000,
+    maxFutureHours: 2,
+    minCoverageRatio: 0.95,
+    allowedHostGroupIds: [],
+    maxRawRows: 50,
+    maxRawResultChars: 12_000,
+    rawQueryMethods: ["host.get", "template.get"],
+  };
+
+  function api(handlers: Record<string, (p: Record<string, unknown>) => unknown>) {
+    const calls: string[] = [];
+    return {
+      calls,
+      async request<T>(method: string, params: Record<string, unknown>): Promise<T> {
+        calls.push(method);
+        const handler = handlers[method];
+        if (!handler) {
+          throw new Error(`unexpected Zabbix method: ${method}`);
+        }
+        return handler(params) as T;
+      },
+    };
+  }
+
+  const allow = async () => undefined;
+
+  it("says templates are invisible when the account can see none", async () => {
+    const client = api({
+      "host.get": () => [{ hostid: "11094", parentTemplates: [] }],
+      "template.get": () => [],
+    });
+    const result = await runRawQuery(
+      client,
+      policy,
+      { method: "host.get", params: { hostids: ["11094"], selectParentTemplates: ["name"] } },
+      allow,
+      12_000,
+    );
+    const quality = result.data_quality as Record<string, unknown>;
+    expect(quality.templates_visible).toBe(false);
+    expect(client.calls).toContain("template.get");
+  });
+
+  it("says nothing when the account can see templates", async () => {
+    // Then an empty list really is an empty list, and an annotation would only
+    // cast doubt on a true answer.
+    const client = api({
+      "host.get": () => [{ hostid: "11094", parentTemplates: [] }],
+      "template.get": () => [{ templateid: "10001" }],
+    });
+    const result = await runRawQuery(
+      client,
+      policy,
+      { method: "host.get", params: { hostids: ["11094"], selectParentTemplates: ["name"] } },
+      allow,
+      12_000,
+    );
+    expect((result.data_quality as Record<string, unknown>).templates_visible).toBe(true);
+  });
+
+  it("does not probe when templates were found", async () => {
+    const client = api({
+      "host.get": () => [{ hostid: "11094", parentTemplates: [{ name: "Docker" }] }],
+    });
+    const result = await runRawQuery(
+      client,
+      policy,
+      { method: "host.get", params: { hostids: ["11094"], selectParentTemplates: ["name"] } },
+      allow,
+      12_000,
+    );
+    expect(client.calls).toEqual(["host.get"]);
+    expect((result.data_quality as Record<string, unknown>).templates_visible).toBeUndefined();
+  });
+
+  it("does not probe for a question that is not about templates", async () => {
+    const client = api({ "host.get": () => [{ hostid: "11094" }] });
+    await runRawQuery(client, policy, { method: "host.get", params: { hostids: ["11094"] } }, allow, 12_000);
+    expect(client.calls).toEqual(["host.get"]);
+  });
+});
