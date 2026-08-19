@@ -35,6 +35,44 @@ describe("query policies", () => {
     expect(result.durationSeconds).toBe(3600);
   });
 
+  it("accepts the fractional seconds a non-JavaScript client sends", () => {
+    // Python's isoformat prints microseconds. Three digits was JavaScript's
+    // millisecond habit, not ISO 8601, and a question about the present -- the
+    // one case whose window comes off the arrival clock -- was refused for
+    // being too precise about a boundary Zabbix stores in whole seconds.
+    for (const from of [
+      "2026-08-19T02:37:14Z",
+      "2026-08-19T02:37:14.4Z",
+      "2026-08-19T02:37:14.423Z",
+      "2026-08-19T02:37:14.423000Z",
+      "2026-08-19T11:37:14.423000+09:00",
+    ]) {
+      const result = validateWindow(
+        { from, to: "2026-08-19T03:37:14Z" },
+        "standard",
+        policy,
+        "1m",
+        new Date("2026-08-19T04:00:00Z"),
+      );
+      expect(result.durationSeconds).toBeGreaterThan(0);
+    }
+  });
+
+  it("still refuses more precision than ISO 8601 second fractions carry", () => {
+    expect(() =>
+      validateWindow(
+        {
+          from: "2026-08-19T02:37:14.4230001Z",
+          to: "2026-08-19T03:37:14Z",
+        },
+        "standard",
+        policy,
+        "1m",
+        new Date("2026-08-19T04:00:00Z"),
+      ),
+    ).toThrowError(AppError);
+  });
+
   it("rejects timestamps without an explicit timezone", () => {
     expect(() =>
       validateWindow(

@@ -6,8 +6,14 @@ import type {
   TimeWindow,
 } from "./types.js";
 
+// Fractional seconds up to microseconds. Three digits was milliseconds, which
+// is what a JavaScript Date prints -- but the callers are not all JavaScript.
+// A Python client sends six, ISO 8601 allows any number, and the tool
+// description promises ISO 8601, so refusing them made a valid timestamp look
+// like a malformed one. The value is floored to whole seconds anyway; Zabbix
+// stores event times as epoch seconds.
 const isoWithTimezone =
-  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$/;
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,6})?)?(?:Z|[+-]\d{2}:\d{2})$/;
 
 const aggregationSeconds: Record<Aggregation, number | null> = {
   raw: null,
