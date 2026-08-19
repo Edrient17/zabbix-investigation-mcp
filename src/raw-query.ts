@@ -34,9 +34,19 @@ const READ_METHODS: Record<string, "group" | "host" | "none"> = {
   "graph.get": "group",
   "httptest.get": "group",
   "hostinterface.get": "host",
+  // Neither a dashboard nor a template belongs to a host group, so there is
+  // nothing to intersect an allowlist into; the Zabbix role's own permissions
+  // are the fence. Templates were added to the role deliberately -- a host's
+  // triggers are mostly inherited, and without them "which templates" cannot
+  // be answered.
   "dashboard.get": "none",
   "template.get": "none",
-  "usermacro.get": "none",
+  // A macro does belong to a host, so it can be confined like one. Left
+  // unscoped it reached any host the role could see, and reached global macros
+  // besides -- which are the ones most likely to hold a credential and are
+  // never the answer to a question about one host. Requiring hostids closes
+  // both.
+  "usermacro.get": "host",
   // Who changed Zabbix, and when. A threshold edited an hour before the alert
   // is the kind of cause no metric shows.
   "auditlog.get": "none",

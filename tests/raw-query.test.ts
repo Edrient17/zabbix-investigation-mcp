@@ -302,3 +302,63 @@ describe("templates you cannot see", () => {
     expect(client.calls).toEqual(["host.get"]);
   });
 });
+
+describe("macros belong to hosts", () => {
+  /**
+   * usermacro.get was unscoped, so it reached every host the Zabbix role could
+   * see and global macros besides. Global macros are the ones most likely to
+   * hold a credential and are never the answer to a question about one host.
+   */
+  const policy: QueryPolicy = {
+    maxWindowHours: 26,
+    longTermMaxDays: 400,
+    maxEvents: 100,
+    maxItemsPerCall: 20,
+    maxHistoryPoints: 1_000,
+    maxSourcePoints: 50_000,
+    maxFutureHours: 2,
+    minCoverageRatio: 0.95,
+    allowedHostGroupIds: ["73"],
+    maxRawRows: 50,
+    maxRawResultChars: 12_000,
+    rawQueryMethods: ["usermacro.get"],
+  };
+  const api = {
+    async request<T>(): Promise<T> {
+      return [] as unknown as T;
+    },
+  };
+
+  it("refuses a macro query that names no host", async () => {
+    await expect(
+      runRawQuery(api, policy, { method: "usermacro.get", params: {} }, async () => undefined, 12_000),
+    ).rejects.toThrowError(/hostids/);
+  });
+
+  it("refuses a global macro query", async () => {
+    // globalmacro: true names no host by definition, so it cannot be confined.
+    await expect(
+      runRawQuery(
+        api,
+        policy,
+        { method: "usermacro.get", params: { globalmacro: true } },
+        async () => undefined,
+        12_000,
+      ),
+    ).rejects.toThrowError(/hostids/);
+  });
+
+  it("checks each named host against the allowlist", async () => {
+    const checked: string[] = [];
+    await runRawQuery(
+      api,
+      policy,
+      { method: "usermacro.get", params: { hostids: ["11094", "10663"] } },
+      async (hostId) => {
+        checked.push(hostId);
+      },
+      12_000,
+    );
+    expect(checked).toEqual(["11094", "10663"]);
+  });
+});
