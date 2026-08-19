@@ -9,12 +9,14 @@ Agent가 조사할 호스트·메트릭·시간 범위·집계 간격을 결정�
 - `find_hosts` — 이름으로 검색하거나, `group_ids`로 호스트 그룹에 속한 호스트를
   나열합니다. 후자는 질문이 호스트를 지목하지 않는 조사(정기 보고서 등)가
   대상을 정하는 경로입니다. 둘 중 하나는 반드시 필요합니다.
-- `get_incident_events`
-- `get_trigger_details`
-- `list_relevant_metrics`
-- `get_metric_summary`
-- `get_metric_history`
-- `get_related_events`
+- `get_incident_events` — 한 호스트의 문제 이벤트와 복구 이벤트. 심각도로 거를 수
+  있습니다.
+- `get_trigger_details` — 트리거 정의, 연관 아이템, 의존 관계.
+- `list_relevant_metrics` — 키워드로 호스트의 수치 아이템을 찾아 `item_id`를 얻는
+  경로. 메트릭 조회의 입구입니다.
+- `get_metric_summary` — 여러 아이템의 구간 요약(min·max·avg·first·last·변화율).
+- `get_metric_history` — 한 아이템의 구간 내 시계열 모양.
+- `get_related_events` — 같은 호스트의 인접 이벤트. 트리거 ID나 태그로 좁힙니다.
 - `query_zabbix` — 위 도구들이 모양을 잡아 주지 않는 질문을 위한 통로. 아래에서
   따로 설명합니다.
 
@@ -223,6 +225,32 @@ httptest.get   dashboard.get      template.get usermacro.get
 역할에는 읽기 권한만 두고, 호스트 그룹 접근은 `ZABBIX_ALLOWED_HOST_GROUP_IDS`와
 Zabbix 쪽 권한 **양쪽에서** 좁힙니다. 이 서버의 그룹 제한은 편의를 위한 것이지
 Zabbix 권한을 대신하지 않습니다.
+
+## 조회 구간 정책
+
+구간 한도는 `policy` 인자로 고릅니다. `get_incident_events`,
+`get_related_events`, `get_metric_summary`가 받습니다.
+
+| `policy` | 한도 | 쓰임 |
+| --- | --- | --- |
+| `standard` (기본) | `INVESTIGATION_MAX_WINDOW_HOURS` (기본 `26`) | 사건 하나를 보는 조사 |
+| `long_term_capacity` | `INVESTIGATION_LONG_TERM_MAX_DAYS` (기본 `400`) | 월간·연간 정기 보고서 |
+
+한도를 넘기면 `TIME_RANGE_LIMIT_EXCEEDED`로 거절합니다. **조용히 자르지
+않습니다** — 한 달을 물었는데 하루가 돌아오고 그 사실이 어디에도 남지 않는 것이
+가장 나쁜 결과이기 때문입니다.
+
+`long_term_capacity`는 메트릭 조회에서 trend 데이터를 읽으므로 1시간 이상 집계를
+요구합니다. 이벤트 조회는 집계를 하지 않으므로 이 제약을 받지 않습니다.
+
+400일이라는 상한이 남아 있는 이유는 `INVESTIGATION_MAX_SOURCE_POINTS`가 양을
+막아 줄 뿐 `time_from`을 잘못 적은 것은 아무도 못 잡기 때문입니다.
+
+### 이벤트 응답의 `partial`
+
+이벤트 조회는 `limit`(기본·최대 `INVESTIGATION_MAX_EVENTS`)에서 끊깁니다. 끊긴
+경우 `partial: true`가 함께 오고, 그때 `result_count`는 **하한**입니다. "지난달
+이벤트 3건"이라고 쓰기 전에 이 값을 확인해야 합니다.
 
 ## 집계 정책
 
