@@ -363,21 +363,28 @@ describe("macros belong to hosts", () => {
   });
 });
 
+// runRawQuery is typed as a bare record, so the tests below name the one field
+// they read rather than asserting on `unknown`.
+function quality(result: Record<string, unknown>): Record<string, unknown> {
+  return result.data_quality as Record<string, unknown>;
+}
+
 describe("selects Zabbix accepted without answering", () => {
-  // Asked which templates a host carried, an investigation sent
-  // `selectTemplates` -- valid on template.get, not on host.get. Zabbix ignored
-  // it silently, the row came back with no template field, and the report said
-  // the host had zero templates. It had two.
+  // The case that started this: `selectTemplates` on host.get came back with no
+  // template field and the report read it as zero templates. That spelling is
+  // corrected outright now, so the example here is one with no single correct
+  // target -- selectHosts belongs to trigger.get and item.get, and what a
+  // caller naming it on host.get wanted is theirs to say, not this tool's.
   it("names a select that produced no field", async () => {
     const { api } = recorder([{ hostid: "11094", name: "vm-java-docker-2" }]);
     const result = await runRawQuery(
       api,
       makePolicy(),
-      { method: "host.get", params: { hostids: ["11094"], selectTemplates: ["name"] } },
+      { method: "host.get", params: { hostids: ["11094"], selectHosts: ["name"] } },
       allowAll,
       12_000,
     );
-    expect(result.data_quality.selects_ignored).toEqual(["selectTemplates"]);
+    expect(quality(result).selects_ignored).toEqual(["selectHosts"]);
   });
 
   it("stays quiet when the select was answered", async () => {
@@ -394,7 +401,7 @@ describe("selects Zabbix accepted without answering", () => {
       allowAll,
       12_000,
     );
-    expect(result.data_quality.selects_ignored).toBeUndefined();
+    expect(quality(result).selects_ignored).toBeUndefined();
   });
 
   it("treats an answered-but-empty field as answered", async () => {
@@ -408,7 +415,7 @@ describe("selects Zabbix accepted without answering", () => {
       allowAll,
       12_000,
     );
-    expect(result.data_quality.selects_ignored).toBeUndefined();
+    expect(quality(result).selects_ignored).toBeUndefined();
   });
 
   it("reports each ignored select separately", async () => {
@@ -421,15 +428,15 @@ describe("selects Zabbix accepted without answering", () => {
         params: {
           hostids: ["11094"],
           selectTriggers: ["triggerid"],
-          selectTemplates: ["name"],
+          selectHosts: ["name"],
           selectHostGroups: ["name"],
         },
       },
       allowAll,
       12_000,
     );
-    expect(result.data_quality.selects_ignored).toEqual([
-      "selectTemplates",
+    expect(quality(result).selects_ignored).toEqual([
+      "selectHosts",
       "selectHostGroups",
     ]);
   });
@@ -440,10 +447,102 @@ describe("selects Zabbix accepted without answering", () => {
     const result = await runRawQuery(
       api,
       makePolicy(),
-      { method: "host.get", params: { hostids: ["404"], selectTemplates: ["name"] } },
+      { method: "host.get", params: { hostids: ["404"], selectHosts: ["name"] } },
       allowAll,
       12_000,
     );
-    expect(result.data_quality.selects_ignored).toBeUndefined();
+    expect(quality(result).selects_ignored).toBeUndefined();
+  });
+});
+
+describe("selects this method spells differently", () => {
+  // Told its parameter had been ignored, the next run reported that it could
+  // not determine the templates -- true, and still not the answer. Knowing a
+  // name is wrong does not supply the right one, and there is only one right
+  // one here: a host has no child templates, so selectTemplates on host.get can
+  // mean nothing but selectParentTemplates.
+  it("sends the name Zabbix answers", async () => {
+    const { api, calls } = recorder([
+      { hostid: "11094", parentTemplates: [{ templateid: "11083", name: "Docker" }] },
+    ]);
+    const result = await runRawQuery(
+      api,
+      makePolicy(),
+      { method: "host.get", params: { hostids: ["11094"], selectTemplates: ["name"] } },
+      allowAll,
+      12_000,
+    );
+    expect(calls[0]!.params.selectParentTemplates).toEqual(["name"]);
+    expect(calls[0]!.params.selectTemplates).toBeUndefined();
+    expect(quality(result).selects_renamed).toEqual([
+      { from: "selectTemplates", to: "selectParentTemplates" },
+    ]);
+  });
+
+  it("does not leave the caller reading an ignored parameter as well", async () => {
+    // The two annotations would otherwise contradict each other: renamed and
+    // answered, yet reported as ignored because the original name filled nothing.
+    const { api } = recorder([
+      { hostid: "11094", parentTemplates: [{ templateid: "11083", name: "Docker" }] },
+    ]);
+    const result = await runRawQuery(
+      api,
+      makePolicy(),
+      { method: "host.get", params: { hostids: ["11094"], selectTemplates: ["name"] } },
+      allowAll,
+      12_000,
+    );
+    expect(quality(result).selects_ignored).toBeUndefined();
+  });
+
+  it("leaves the correct spelling alone", async () => {
+    const { api, calls } = recorder([{ hostid: "11094", parentTemplates: [] }]);
+    const result = await runRawQuery(
+      api,
+      makePolicy(),
+      {
+        method: "host.get",
+        params: { hostids: ["11094"], selectParentTemplates: ["name"] },
+      },
+      allowAll,
+      12_000,
+    );
+    expect(calls[0]!.params.selectParentTemplates).toEqual(["name"]);
+    expect(quality(result).selects_renamed).toBeUndefined();
+  });
+
+  it("keeps what the caller already spelled right when both are named", async () => {
+    const { api, calls } = recorder([{ hostid: "11094", parentTemplates: [] }]);
+    await runRawQuery(
+      api,
+      makePolicy(),
+      {
+        method: "host.get",
+        params: {
+          hostids: ["11094"],
+          selectTemplates: ["templateid"],
+          selectParentTemplates: ["name"],
+        },
+      },
+      allowAll,
+      12_000,
+    );
+    expect(calls[0]!.params.selectParentTemplates).toEqual(["name"]);
+    expect(calls[0]!.params.selectTemplates).toBeUndefined();
+  });
+
+  it("corrects nothing on a method that has no alias", async () => {
+    // template.get is where selectTemplates means something of its own, and
+    // rewriting it there would answer a different question than the one asked.
+    const { api, calls } = recorder([{ templateid: "11083", templates: [] }]);
+    const result = await runRawQuery(
+      api,
+      makePolicy({ rawQueryMethods: ["template.get"] }),
+      { method: "template.get", params: { selectTemplates: ["name"] } },
+      allowAll,
+      12_000,
+    );
+    expect(calls[0]!.params.selectTemplates).toEqual(["name"]);
+    expect(quality(result).selects_renamed).toBeUndefined();
   });
 });

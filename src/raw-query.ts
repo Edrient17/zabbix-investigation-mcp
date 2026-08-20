@@ -139,6 +139,8 @@ export async function runRawQuery(
     }
   }
 
+  const renamedSelects = applySelectAliases(method, params);
+
   const allowlist = policy.allowedHostGroupIds;
 
   if (scope === "group" && allowlist.length > 0) {
@@ -213,9 +215,65 @@ export async function runRawQuery(
       confined_to_host_groups: allowlist.length > 0 ? allowlist : null,
       // Named only when there are any, so an ordinary query stays quiet.
       ...(ignoredSelects.length > 0 ? { selects_ignored: ignoredSelects } : {}),
+      ...(renamedSelects.length > 0 ? { selects_renamed: renamedSelects } : {}),
       ...templateVisibility,
     },
   };
+}
+
+/**
+ * Zabbix's own name for a select the caller wrote another way.
+ *
+ * Only where the caller's spelling has exactly one thing it can mean. On
+ * host.get, linked templates are `selectParentTemplates`; `selectTemplates` is a
+ * template.get parameter for a template's children, and a host has no children,
+ * so there is no second reading to choose between.
+ *
+ * This is a table of parameter names and will need an entry each time another
+ * one turns up, which is the cost of correcting rather than reporting. It is
+ * paid only for names with a single correct target -- anything genuinely
+ * ambiguous belongs in `selects_ignored`, where the caller decides.
+ */
+const SELECT_ALIASES: Record<string, Record<string, string>> = {
+  "host.get": { selectTemplates: "selectParentTemplates" },
+};
+
+/**
+ * Rewrite the selects this method names differently, reporting what changed.
+ *
+ * Zabbix drops an unrecognised select without complaining, so `selectTemplates`
+ * on host.get returned a host with no template field and an investigation read
+ * that as a host with no templates. Told instead that its parameter had been
+ * ignored, the next run reported that it could not determine the templates --
+ * true, and still not the answer, because knowing the name was wrong does not
+ * supply the right one.
+ *
+ * The rewrite is reported rather than performed quietly: params_applied already
+ * shows the query as actually sent, and this names the substitution outright, so
+ * a caller comparing what it wrote against what ran can see the difference.
+ */
+export function applySelectAliases(
+  method: string,
+  params: Record<string, unknown>,
+): Array<{ from: string; to: string }> {
+  const aliases = SELECT_ALIASES[method];
+  if (!aliases) {
+    return [];
+  }
+  const renamed: Array<{ from: string; to: string }> = [];
+  for (const [from, to] of Object.entries(aliases)) {
+    if (!(from in params)) {
+      continue;
+    }
+    // A caller that named both meant the one Zabbix answers; dropping the
+    // alias silently here is safe because the correct parameter is present.
+    if (!(to in params)) {
+      params[to] = params[from];
+      renamed.push({ from, to });
+    }
+    delete params[from];
+  }
+  return renamed;
 }
 
 /**
