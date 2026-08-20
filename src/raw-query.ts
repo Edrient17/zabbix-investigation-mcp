@@ -182,6 +182,7 @@ export async function runRawQuery(
   const rows = Array.isArray(raw) ? raw : [raw];
 
   const templateVisibility = await describeTemplateVisibility(api, method, params, rows);
+  const ignoredSelects = unansweredSelects(params, rows);
 
   // Truncated by characters as well as by rows: one row of an item with every
   // field selected can be larger than a hundred rows of two fields.
@@ -210,13 +211,55 @@ export async function runRawQuery(
       // Absent when this deployment sets no allowlist, so a caller can tell
       // "everything" from "everything I am allowed to see".
       confined_to_host_groups: allowlist.length > 0 ? allowlist : null,
+      // Named only when there are any, so an ordinary query stays quiet.
+      ...(ignoredSelects.length > 0 ? { selects_ignored: ignoredSelects } : {}),
       ...templateVisibility,
     },
   };
 }
 
 /**
- * Whether an empty template answer means "none" or "none you may see".
+ * Select parameters Zabbix accepted without answering.
+ *
+ * Zabbix drops a select it does not recognise instead of refusing it, so a
+ * misspelled one comes back as a field that is simply absent -- indistinguishable,
+ * to a reader, from a field that is genuinely empty. Asked which templates a
+ * host carried, an investigation sent `selectTemplates`, which is valid on
+ * template.get and not on host.get. Zabbix ignored it, the row came back with no
+ * template field, and the report stated the host had zero templates. It had two.
+ *
+ * The field a select fills is its own name with the prefix removed and the next
+ * letter lowered: selectParentTemplates fills parentTemplates, selectTriggers
+ * fills triggers. That holds across the API, so this needs no table of parameter
+ * names and cannot go stale when Zabbix adds one.
+ *
+ * An empty result set says nothing either way and is left alone.
+ */
+export function unansweredSelects(
+  params: Record<string, unknown>,
+  rows: unknown[],
+): string[] {
+  if (rows.length === 0) {
+    return [];
+  }
+  const ignored: string[] = [];
+  for (const key of Object.keys(params)) {
+    if (!key.startsWith("select") || key.length <= "select".length) {
+      continue;
+    }
+    const field = key.charAt(6).toLowerCase() + key.slice(7);
+    const answered = rows.some(
+      (row) => typeof row === "object" && row !== null && field in row,
+    );
+    if (!answered) {
+      ignored.push(key);
+    }
+  }
+  return ignored;
+}
+
+/**
+ * Whether an empty template answer means "none" or "none you may see". "none" or "none you may see".
  *
  * Zabbix 6.0 moved templates into their own groups with their own permissions,
  * so a role granted read on a host group still sees `parentTemplates: []` for a

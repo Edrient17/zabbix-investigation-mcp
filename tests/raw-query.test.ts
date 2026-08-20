@@ -362,3 +362,88 @@ describe("macros belong to hosts", () => {
     expect(checked).toEqual(["11094", "10663"]);
   });
 });
+
+describe("selects Zabbix accepted without answering", () => {
+  // Asked which templates a host carried, an investigation sent
+  // `selectTemplates` -- valid on template.get, not on host.get. Zabbix ignored
+  // it silently, the row came back with no template field, and the report said
+  // the host had zero templates. It had two.
+  it("names a select that produced no field", async () => {
+    const { api } = recorder([{ hostid: "11094", name: "vm-java-docker-2" }]);
+    const result = await runRawQuery(
+      api,
+      makePolicy(),
+      { method: "host.get", params: { hostids: ["11094"], selectTemplates: ["name"] } },
+      allowAll,
+      12_000,
+    );
+    expect(result.data_quality.selects_ignored).toEqual(["selectTemplates"]);
+  });
+
+  it("stays quiet when the select was answered", async () => {
+    const { api } = recorder([
+      { hostid: "11094", parentTemplates: [{ templateid: "11083", name: "Docker" }] },
+    ]);
+    const result = await runRawQuery(
+      api,
+      makePolicy(),
+      {
+        method: "host.get",
+        params: { hostids: ["11094"], selectParentTemplates: ["name"] },
+      },
+      allowAll,
+      12_000,
+    );
+    expect(result.data_quality.selects_ignored).toBeUndefined();
+  });
+
+  it("treats an answered-but-empty field as answered", async () => {
+    // A host with no triggers is a fact. Reporting it as an ignored parameter
+    // would replace one wrong reading with another.
+    const { api } = recorder([{ hostid: "11094", triggers: [] }]);
+    const result = await runRawQuery(
+      api,
+      makePolicy(),
+      { method: "host.get", params: { hostids: ["11094"], selectTriggers: ["triggerid"] } },
+      allowAll,
+      12_000,
+    );
+    expect(result.data_quality.selects_ignored).toBeUndefined();
+  });
+
+  it("reports each ignored select separately", async () => {
+    const { api } = recorder([{ hostid: "11094", triggers: [] }]);
+    const result = await runRawQuery(
+      api,
+      makePolicy(),
+      {
+        method: "host.get",
+        params: {
+          hostids: ["11094"],
+          selectTriggers: ["triggerid"],
+          selectTemplates: ["name"],
+          selectHostGroups: ["name"],
+        },
+      },
+      allowAll,
+      12_000,
+    );
+    expect(result.data_quality.selects_ignored).toEqual([
+      "selectTemplates",
+      "selectHostGroups",
+    ]);
+  });
+
+  it("says nothing when there were no rows to judge by", async () => {
+    // An empty result set is evidence about the filter, not about the select.
+    const { api } = recorder([]);
+    const result = await runRawQuery(
+      api,
+      makePolicy(),
+      { method: "host.get", params: { hostids: ["404"], selectTemplates: ["name"] } },
+      allowAll,
+      12_000,
+    );
+    expect(result.data_quality.selects_ignored).toBeUndefined();
+  });
+});
