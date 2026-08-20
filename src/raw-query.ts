@@ -185,6 +185,7 @@ export async function runRawQuery(
 
   const templateVisibility = await describeTemplateVisibility(api, method, params, rows);
   const ignoredSelects = unansweredSelects(params, rows);
+  const selectCounts = countSelectedRows(rows);
 
   // Truncated by characters as well as by rows: one row of an item with every
   // field selected can be larger than a hundred rows of two fields.
@@ -216,9 +217,40 @@ export async function runRawQuery(
       // Named only when there are any, so an ordinary query stays quiet.
       ...(ignoredSelects.length > 0 ? { selects_ignored: ignoredSelects } : {}),
       ...(renamedSelects.length > 0 ? { selects_renamed: renamedSelects } : {}),
+      ...(selectCounts ? { select_counts: selectCounts } : {}),
       ...templateVisibility,
     },
   };
+}
+
+/**
+ * How many entries each nested select returned, when that has one answer.
+ *
+ * `returned` counts the rows this method produced; a select fills an array
+ * inside one of them, and nothing counted those. Handed a host with twenty-six
+ * triggers, a report stated twenty-five -- Zabbix returned twenty-six, the reply
+ * was not truncated, and the evidence held all of them. The count was simply
+ * recomputed by eye at the far end of the pipeline, and counting a list of
+ * twenty-six is not something to ask a reader to do when the length is known
+ * here.
+ *
+ * Only for a single row, which is where a nested count means one thing. Across
+ * several hosts "how many triggers" is a different question with a different
+ * answer per row, and one summed number would be a worse answer than none.
+ */
+export function countSelectedRows(
+  rows: unknown[],
+): Record<string, number> | null {
+  if (rows.length !== 1 || typeof rows[0] !== "object" || rows[0] === null) {
+    return null;
+  }
+  const counts: Record<string, number> = {};
+  for (const [key, value] of Object.entries(rows[0] as Record<string, unknown>)) {
+    if (Array.isArray(value)) {
+      counts[key] = value.length;
+    }
+  }
+  return Object.keys(counts).length > 0 ? counts : null;
 }
 
 /**

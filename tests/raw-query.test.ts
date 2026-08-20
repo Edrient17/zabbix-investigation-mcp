@@ -546,3 +546,80 @@ describe("selects this method spells differently", () => {
     expect(quality(result).selects_renamed).toBeUndefined();
   });
 });
+
+describe("counting what a select returned", () => {
+  // Handed a host with twenty-six triggers, a report stated twenty-five.
+  // Zabbix returned twenty-six, the reply was not truncated, and the evidence
+  // held all of them -- the count was recomputed by eye at the far end. The
+  // length is known here, so it is stated here.
+  it("states the length of each nested array", async () => {
+    const { api } = recorder([
+      {
+        hostid: "11094",
+        parentTemplates: [{ templateid: "11083" }, { templateid: "11084" }],
+        triggers: Array.from({ length: 26 }, (_, i) => ({ triggerid: String(i) })),
+      },
+    ]);
+    const result = await runRawQuery(
+      api,
+      makePolicy(),
+      {
+        method: "host.get",
+        params: {
+          hostids: ["11094"],
+          selectParentTemplates: ["templateid"],
+          selectTriggers: ["triggerid"],
+        },
+      },
+      allowAll,
+      12_000,
+    );
+    expect(quality(result).select_counts).toEqual({
+      parentTemplates: 2,
+      triggers: 26,
+    });
+  });
+
+  it("counts an empty select as zero rather than omitting it", async () => {
+    // Zero is the answer to "how many", and leaving it out would send the
+    // reader back to counting an absence.
+    const { api } = recorder([{ hostid: "11094", triggers: [] }]);
+    const result = await runRawQuery(
+      api,
+      makePolicy(),
+      { method: "host.get", params: { hostids: ["11094"], selectTriggers: ["triggerid"] } },
+      allowAll,
+      12_000,
+    );
+    expect(quality(result).select_counts).toEqual({ triggers: 0 });
+  });
+
+  it("says nothing when several rows make the count ambiguous", async () => {
+    // Across hosts "how many triggers" has an answer per row, and one summed
+    // number would be a worse answer than none.
+    const { api } = recorder([
+      { hostid: "1", triggers: [{ triggerid: "a" }] },
+      { hostid: "2", triggers: [{ triggerid: "b" }, { triggerid: "c" }] },
+    ]);
+    const result = await runRawQuery(
+      api,
+      makePolicy(),
+      { method: "host.get", params: { selectTriggers: ["triggerid"] } },
+      allowAll,
+      12_000,
+    );
+    expect(quality(result).select_counts).toBeUndefined();
+  });
+
+  it("says nothing when the row carries no arrays", async () => {
+    const { api } = recorder([{ hostid: "11094", name: "vm-java-docker-2" }]);
+    const result = await runRawQuery(
+      api,
+      makePolicy(),
+      { method: "host.get", params: { hostids: ["11094"] } },
+      allowAll,
+      12_000,
+    );
+    expect(quality(result).select_counts).toBeUndefined();
+  });
+})
