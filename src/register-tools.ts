@@ -9,6 +9,29 @@ import type { ZabbixService } from "./zabbix-service.js";
 const zabbixId = z
   .string()
   .regex(/^\d+$/, "Zabbix IDs must contain decimal digits only");
+/**
+ * How every host-scoped tool takes its host.
+ *
+ * The id is Zabbix's own handle. The name is what the rest of the estate calls
+ * the same machine, so a caller holding only a name -- from a log line, an agent
+ * list, the person who reported it -- can still reach these tools. The server
+ * resolves the name, because two of the Zabbix methods underneath reject one and
+ * knowing which is not the caller's problem.
+ */
+const hostRef = {
+  host_id: zabbixId
+    .optional()
+    .describe("Zabbix host id, as returned by find_hosts."),
+  host: z
+    .string()
+    .trim()
+    .min(1)
+    .max(255)
+    .optional()
+    .describe(
+      "Host name, matched exactly against both the technical and the visible name. A name matching several hosts is an error rather than a guess. Give either host_id or host.",
+    ),
+};
 const isoTime = z.iso
   .datetime({ offset: true })
   .describe("ISO 8601 date-time including Z or an explicit UTC offset");
@@ -81,9 +104,9 @@ export function registerTools(
     {
       title: "Get incident events",
       description:
-        "Retrieve trigger problem events and their recovery events for one host in a time window. Filter by severity; include_recovery controls whether recovery events are paired in. Months-long windows need policy long_term_capacity. The reply carries partial, which is true when the row limit was reached and the count is therefore a floor.",
+        "Retrieve trigger problem events and their recovery events for one host in a time window. Identify the host by host_id or by host name. Filter by severity; include_recovery controls whether recovery events are paired in. Months-long windows need policy long_term_capacity. The reply carries partial, which is true when the row limit was reached and the count is therefore a floor.",
       inputSchema: {
-        host_id: zabbixId,
+        ...hostRef,
         time_from: isoTime,
         time_to: isoTime,
         severities: z.array(severity).max(6).optional(),
@@ -119,9 +142,9 @@ export function registerTools(
     {
       title: "List relevant numeric metrics",
       description:
-        "Rank a host's numeric items against supplied keywords by item name and key. Returns item_id, name, key, value type and units for the highest-ranked matches.",
+        "Rank a host's numeric items against supplied keywords by item name and key. Identify the host by host_id or by host name. Returns item_id, name, key, value type and units for the highest-ranked matches.",
       inputSchema: {
-        host_id: zabbixId,
+        ...hostRef,
         keywords: z.array(z.string().trim().min(1).max(100)).min(1).max(20),
         limit: z.number().int().min(1).max(100).optional(),
       },
@@ -134,9 +157,9 @@ export function registerTools(
     {
       title: "Get aggregated metric summaries",
       description:
-        "Aggregate numeric metrics over a window, returning per-series min, max, average, first, last, change percent and trend. Takes up to 20 item_ids and an aggregation interval. The long_term_capacity policy reads trend data and requires an interval of at least 1h. include_points adds aggregated buckets and is disabled by default.",
+        "Aggregate numeric metrics over a window, returning per-series min, max, average, first, last, change percent and trend. Identify the host by host_id or by host name. Takes up to 20 item_ids and an aggregation interval. The long_term_capacity policy reads trend data and requires an interval of at least 1h. include_points adds aggregated buckets and is disabled by default.",
       inputSchema: {
-        host_id: zabbixId,
+        ...hostRef,
         item_ids: z.array(zabbixId).min(1).max(20),
         time_from: isoTime,
         time_to: isoTime,
@@ -158,9 +181,9 @@ export function registerTools(
     {
       title: "Get detailed metric history",
       description:
-        "Retrieve the aggregated points for a single numeric item over a window. Takes one item_id and an optional max_points; exceeding the point limit is an error rather than a silent truncation.",
+        "Retrieve the aggregated points for a single numeric item over a window. Identify the host by host_id or by host name. Takes one item_id and an optional max_points; exceeding the point limit is an error rather than a silent truncation.",
       inputSchema: {
-        host_id: zabbixId,
+        ...hostRef,
         item_id: zabbixId,
         time_from: isoTime,
         time_to: isoTime,
@@ -176,9 +199,9 @@ export function registerTools(
     {
       title: "Get related events",
       description:
-        "Retrieve neighboring problem and recovery events on the same host, optionally restricted by trigger IDs or exact tags. Months-long windows need policy long_term_capacity; partial is true when the row limit was reached.",
+        "Retrieve neighboring problem and recovery events on the same host, optionally restricted by trigger IDs or exact tags. Identify the host by host_id or by host name. Months-long windows need policy long_term_capacity; partial is true when the row limit was reached.",
       inputSchema: {
-        host_id: zabbixId,
+        ...hostRef,
         time_from: isoTime,
         time_to: isoTime,
         exclude_event_id: zabbixId.optional(),

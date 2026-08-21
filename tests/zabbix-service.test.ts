@@ -589,3 +589,118 @@ describe("saying a moment twice", () => {
     expect(event.started_at_local).toBe("2026-08-10 11:22:40 (Asia/Seoul)");
   });
 });
+
+/**
+ * Naming the host by name rather than by Zabbix id.
+ *
+ * Five tools took a host_id and nothing else, so a caller that had found the
+ * machine in a log index or an agent list -- where no Zabbix id exists -- could
+ * not reach them at all, and its investigation silently lost the triggers,
+ * events and metrics they would have returned. The id is Zabbix's handle for a
+ * machine; the name is what everything else calls it.
+ */
+describe("addressing a host by name", () => {
+  it("resolves the name and queries by the id it found", async () => {
+    // event.get rejects a host name outright, so the id has to be produced
+    // rather than passed along. Which methods those are is this server's
+    // problem, not the caller's.
+    const api = new MockZabbixApi({
+      "host.get": () => [allowedHost],
+      "event.get": () => [],
+    });
+    const service = new ZabbixService(api, makePolicy());
+
+    const result = await service.getIncidentEvents({
+      host: "Java-test",
+      time_from: "2026-07-30T01:00:00Z",
+      time_to: "2026-07-30T02:00:00Z",
+    });
+
+    const lookup = api.calls.find((call) => call.method === "host.get");
+    expect(lookup?.params).toMatchObject({ searchByAny: true });
+    expect(lookup?.params.hostids).toBeUndefined();
+    const events = api.calls.find((call) => call.method === "event.get");
+    expect(events?.params).toMatchObject({ hostids: ["10084"] });
+    expect(result).toMatchObject({ host_id: "10084", host: "Java-test" });
+  });
+
+  it("matches the visible name too", async () => {
+    const api = new MockZabbixApi({
+      "host.get": () => [allowedHost],
+      "event.get": () => [],
+    });
+    const service = new ZabbixService(api, makePolicy());
+
+    const result = await service.getIncidentEvents({
+      host: "Java Test Server",
+      time_from: "2026-07-30T01:00:00Z",
+      time_to: "2026-07-30T02:00:00Z",
+    });
+    expect(result).toMatchObject({ host_id: "10084" });
+  });
+
+  it("does not accept a substring as the host", async () => {
+    // Zabbix search is a substring match, so asking about `Java` would
+    // otherwise silently answer about `Java-test`.
+    const api = new MockZabbixApi({ "host.get": () => [allowedHost] });
+    const service = new ZabbixService(api, makePolicy());
+
+    await expect(
+      service.listRelevantMetrics({ host: "Java", keywords: ["cpu"] }),
+    ).rejects.toMatchObject({ code: "HOST_NOT_FOUND" });
+  });
+
+  it("refuses to choose when a name matches several hosts", async () => {
+    const twin = {
+      ...allowedHost,
+      hostid: "10085",
+      host: "other",
+      name: "Java-test",
+    };
+    const api = new MockZabbixApi({ "host.get": () => [allowedHost, twin] });
+    const service = new ZabbixService(api, makePolicy());
+
+    await expect(
+      service.listRelevantMetrics({ host: "Java-test", keywords: ["cpu"] }),
+    ).rejects.toMatchObject({ code: "HOST_NAME_AMBIGUOUS" });
+  });
+
+  it("holds the allowlist against a name as firmly as against an id", async () => {
+    const outside = {
+      ...allowedHost,
+      hostgroups: [{ groupid: "99", name: "Somewhere else" }],
+    };
+    const api = new MockZabbixApi({ "host.get": () => [outside] });
+    const service = new ZabbixService(api, makePolicy());
+
+    await expect(
+      service.listRelevantMetrics({ host: "Java-test", keywords: ["cpu"] }),
+    ).rejects.toMatchObject({ code: "HOST_NOT_ALLOWED", status: 403 });
+  });
+
+  it("says so when neither an id nor a name was given", async () => {
+    const api = new MockZabbixApi({ "host.get": () => [allowedHost] });
+    const service = new ZabbixService(api, makePolicy());
+
+    await expect(
+      service.listRelevantMetrics({ keywords: ["cpu"] }),
+    ).rejects.toMatchObject({ code: "HOST_REQUIRED" });
+  });
+
+  it("still takes an id, so callers that have one are unaffected", async () => {
+    const api = new MockZabbixApi({
+      "host.get": () => [allowedHost],
+      "event.get": () => [],
+    });
+    const service = new ZabbixService(api, makePolicy());
+
+    const result = await service.getIncidentEvents({
+      host_id: "10084",
+      time_from: "2026-07-30T01:00:00Z",
+      time_to: "2026-07-30T02:00:00Z",
+    });
+    const lookup = api.calls.find((call) => call.method === "host.get");
+    expect(lookup?.params).toMatchObject({ hostids: ["10084"] });
+    expect(result).toMatchObject({ host_id: "10084" });
+  });
+});

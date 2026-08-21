@@ -156,8 +156,24 @@ export interface FindHostsInput {
   limit?: number;
 }
 
-export interface GetIncidentEventsInput {
-  host_id: string;
+/**
+ * How a caller names the host it is asking about.
+ *
+ * Zabbix's own id is one source's handle for a machine. The name is what every
+ * other source calls it -- a log line, an agent list, the person who filed the
+ * ticket -- so a caller that arrived with only a name was previously shut out
+ * of five of these tools, and its investigation lost whatever they would have
+ * shown. Either is accepted, and the name is resolved here rather than by
+ * everyone who calls.
+ */
+export interface HostRef {
+  /** Zabbix's numeric host id. */
+  host_id?: string;
+  /** Technical or visible host name. Must match exactly. */
+  host?: string;
+}
+
+export interface GetIncidentEventsInput extends HostRef {
   time_from: string;
   time_to: string;
   severities?: Severity[];
@@ -170,14 +186,12 @@ export interface GetTriggerDetailsInput {
   trigger_id: string;
 }
 
-export interface ListRelevantMetricsInput {
-  host_id: string;
+export interface ListRelevantMetricsInput extends HostRef {
   keywords: string[];
   limit?: number;
 }
 
-export interface GetMetricHistoryInput {
-  host_id: string;
+export interface GetMetricHistoryInput extends HostRef {
   item_id: string;
   time_from: string;
   time_to: string;
@@ -185,8 +199,7 @@ export interface GetMetricHistoryInput {
   max_points?: number;
 }
 
-export interface GetMetricSummaryInput {
-  host_id: string;
+export interface GetMetricSummaryInput extends HostRef {
   item_ids: string[];
   time_from: string;
   time_to: string;
@@ -196,8 +209,7 @@ export interface GetMetricSummaryInput {
   include_points?: boolean;
 }
 
-export interface GetRelatedEventsInput {
-  host_id: string;
+export interface GetRelatedEventsInput extends HostRef {
   time_from: string;
   time_to: string;
   exclude_event_id?: string;
@@ -347,7 +359,7 @@ export class ZabbixService {
   async getIncidentEvents(
     input: GetIncidentEventsInput,
   ): Promise<Record<string, unknown>> {
-    await this.assertHostAllowed(input.host_id);
+    const host = await this.resolveHost(input);
     const policyName = input.policy ?? "standard";
     const window = validateWindow(
       { from: input.time_from, to: input.time_to },
@@ -356,7 +368,7 @@ export class ZabbixService {
     );
     const limit = clampLimit(input.limit, this.policy.maxEvents, 100);
     const events = await this.fetchProblemEvents({
-      hostId: input.host_id,
+      hostId: host.hostid,
       window: { from: input.time_from, to: input.time_to },
       severities: input.severities,
       limit,
@@ -369,7 +381,8 @@ export class ZabbixService {
 
     return {
       tool_call_id: randomUUID(),
-      host_id: input.host_id,
+      host_id: host.hostid,
+      host: host.host,
       window: {
         from: window.from.toISOString(),
         to: window.to.toISOString(),
@@ -468,10 +481,10 @@ export class ZabbixService {
   async listRelevantMetrics(
     input: ListRelevantMetricsInput,
   ): Promise<Record<string, unknown>> {
-    await this.assertHostAllowed(input.host_id);
+    const host = await this.resolveHost(input);
     const limit = clampLimit(input.limit, 100, 30);
     const items = await this.api.request<ZabbixItem[]>("item.get", {
-      hostids: [input.host_id],
+      hostids: [host.hostid],
       output: [
         "itemid",
         "hostid",
@@ -513,7 +526,8 @@ export class ZabbixService {
 
     return {
       tool_call_id: randomUUID(),
-      host_id: input.host_id,
+      host_id: host.hostid,
+      host: host.host,
       keywords: normalizedKeywords,
       metrics: ranked.map(({ item, score }) => ({
         ...this.mapItem(item),
@@ -539,7 +553,8 @@ export class ZabbixService {
       this.policy,
       input.aggregation,
     );
-    const [item] = await this.getNumericItems(input.host_id, [input.item_id]);
+    const host = await this.resolveHost(input);
+    const [item] = await this.getNumericItems(host.hostid, [input.item_id]);
     if (!item) {
       throw new AppError("ITEM_NOT_FOUND", "Metric item was not found");
     }
@@ -589,7 +604,8 @@ export class ZabbixService {
         item.itemid,
         `${window.fromEpoch}-${window.toEpoch}-${input.aggregation}`,
       ),
-      host_id: input.host_id,
+      host_id: host.hostid,
+      host: host.host,
       item: this.mapItem(item),
       window: {
         from: window.from.toISOString(),
@@ -620,7 +636,8 @@ export class ZabbixService {
       this.policy,
       input.aggregation,
     );
-    const items = await this.getNumericItems(input.host_id, input.item_ids);
+    const host = await this.resolveHost(input);
+    const items = await this.getNumericItems(host.hostid, input.item_ids);
     const interval = getAggregationSeconds(input.aggregation);
     if (interval === null) {
       throw new AppError(
@@ -725,7 +742,8 @@ export class ZabbixService {
 
     return {
       tool_call_id: randomUUID(),
-      host_id: input.host_id,
+      host_id: host.hostid,
+      host: host.host,
       window: {
         from: window.from.toISOString(),
         to: window.to.toISOString(),
@@ -741,7 +759,7 @@ export class ZabbixService {
   async getRelatedEvents(
     input: GetRelatedEventsInput,
   ): Promise<Record<string, unknown>> {
-    await this.assertHostAllowed(input.host_id);
+    const host = await this.resolveHost(input);
     const window = validateWindow(
       { from: input.time_from, to: input.time_to },
       input.policy ?? "standard",
@@ -749,7 +767,7 @@ export class ZabbixService {
     );
     const limit = clampLimit(input.limit, this.policy.maxEvents, 100);
     const params: Record<string, unknown> = {
-      hostids: [input.host_id],
+      hostids: [host.hostid],
       source: 0,
       object: 0,
       value: 1,
@@ -795,7 +813,8 @@ export class ZabbixService {
 
     return {
       tool_call_id: randomUUID(),
-      host_id: input.host_id,
+      host_id: host.hostid,
+      host: host.host,
       window: {
         from: window.from.toISOString(),
         to: window.to.toISOString(),
@@ -833,6 +852,29 @@ export class ZabbixService {
     );
   }
 
+  /**
+   * The host a caller meant, whether they named it by id or by name.
+   *
+   * Every host-scoped tool goes through here, so the allowlist is checked in
+   * exactly one place and a name costs the same `host.get` the id check already
+   * paid for. Two Zabbix methods -- `event.get` and `history.get` -- reject a
+   * host name outright, which is why the id has to be produced rather than
+   * passed along; the caller no longer has to know which methods those are.
+   */
+  private async resolveHost(ref: HostRef): Promise<ZabbixHost> {
+    if (ref.host_id) {
+      return this.assertHostAllowed(ref.host_id);
+    }
+    const name = ref.host?.trim();
+    if (!name) {
+      throw new AppError(
+        "HOST_REQUIRED",
+        "Provide host_id, or host to look one up by name",
+      );
+    }
+    return this.assertNameAllowed(name);
+  }
+
   private async assertHostAllowed(hostId: string): Promise<ZabbixHost> {
     const hosts = await this.api.request<ZabbixHost[]>("host.get", {
       hostids: [hostId],
@@ -844,12 +886,7 @@ export class ZabbixService {
       throw new AppError("HOST_NOT_FOUND", "Host was not found");
     }
 
-    if (
-      this.policy.allowedHostGroupIds.length > 0 &&
-      !(host.hostgroups ?? []).some((group) =>
-        this.policy.allowedHostGroupIds.includes(group.groupid),
-      )
-    ) {
+    if (!this.withinAllowlist(host)) {
       throw new AppError(
         "HOST_NOT_ALLOWED",
         "Host is outside the configured host group allowlist",
@@ -857,6 +894,67 @@ export class ZabbixService {
       );
     }
     return host;
+  }
+
+  /**
+   * A name is matched exactly, against the technical name and the visible one.
+   *
+   * Zabbix's `search` is a substring match, so it is used to fetch candidates
+   * and the exact comparison is made here -- otherwise asking about `payment`
+   * would silently answer about `payment-worker`. Several exact matches is an
+   * error rather than a choice: an investigation of the wrong machine reads
+   * exactly like an investigation of the right one.
+   */
+  private async assertNameAllowed(name: string): Promise<ZabbixHost> {
+    const candidates = await this.api.request<ZabbixHost[]>("host.get", {
+      search: { host: name, name },
+      searchByAny: true,
+      output: ["hostid", "host", "name", "status"],
+      selectHostGroups: ["groupid", "name"],
+    });
+    const exact = candidates.filter(
+      (host) => host.host === name || host.name === name,
+    );
+    if (exact.length === 0) {
+      throw new AppError("HOST_NOT_FOUND", "No host has that name", {
+        details: { host: name },
+      });
+    }
+
+    const allowed = exact.filter((host) => this.withinAllowlist(host));
+    if (allowed.length === 0) {
+      throw new AppError(
+        "HOST_NOT_ALLOWED",
+        "Host is outside the configured host group allowlist",
+        { status: 403, details: { host: name } },
+      );
+    }
+    if (allowed.length > 1) {
+      throw new AppError(
+        "HOST_NAME_AMBIGUOUS",
+        "That name matches more than one host; call with host_id instead",
+        {
+          details: {
+            host: name,
+            matches: allowed.map((host) => ({
+              host_id: host.hostid,
+              host: host.host,
+              name: host.name,
+            })),
+          },
+        },
+      );
+    }
+    return allowed[0] as ZabbixHost;
+  }
+
+  private withinAllowlist(host: ZabbixHost): boolean {
+    if (this.policy.allowedHostGroupIds.length === 0) {
+      return true;
+    }
+    return (host.hostgroups ?? []).some((group) =>
+      this.policy.allowedHostGroupIds.includes(group.groupid),
+    );
   }
 
   private async getNumericItems(
